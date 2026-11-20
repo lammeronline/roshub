@@ -8,6 +8,10 @@
 :global rhNotifyMsgText
 :global rhSecretGet
 
+:if ([:typeof $rhNotifyMsgText] = "nothing") do={
+  :error "rhNotifyMsgText not set (channel run outside the notify bus)"
+}
+
 :local token [$rhSecretGet key="notify.telegram.token" dflt=""]
 :local chatId [$rhSecretGet key="notify.telegram.chat-id" dflt=""]
 :if ($token = "" || $chatId = "") do={

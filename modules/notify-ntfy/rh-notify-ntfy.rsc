@@ -11,6 +11,10 @@
 :global rhConfigGet
 :global rhSecretGet
 
+:if ([:typeof $rhNotifyMsgText] = "nothing") do={
+  :error "rhNotifyMsgText not set (channel run outside the notify bus)"
+}
+
 :local server [$rhConfigGet key="notify.ntfy.server" dflt="https://ntfy.sh"]
 :local topic [$rhConfigGet key="notify.ntfy.topic" dflt=""]
 :if ($topic = "") do={

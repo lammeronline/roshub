@@ -11,6 +11,10 @@
 :global rhConfigGet
 :global rhSecretGet
 
+:if ([:typeof $rhNotifyMsgText] = "nothing") do={
+  :error "rhNotifyMsgText not set (channel run outside the notify bus)"
+}
+
 :local server [$rhConfigGet key="notify.email.server" dflt=""]
 :local to [$rhConfigGet key="notify.email.to" dflt=""]
 :if ($server = "" || $to = "") do={

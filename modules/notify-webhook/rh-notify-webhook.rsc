@@ -9,6 +9,10 @@
 :global rhNotifyMsgText
 :global rhConfigGet
 
+:if ([:typeof $rhNotifyMsgText] = "nothing") do={
+  :error "rhNotifyMsgText not set (channel run outside the notify bus)"
+}
+
 :local url [$rhConfigGet key="notify.webhook.url" dflt=""]
 :if ($url = "") do={
   :error "notify.webhook.url not set in rh-config"
