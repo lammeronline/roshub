@@ -13,7 +13,7 @@
 # it reads back "nothing"/the local's own value, not the original. Anywhere a default
 # is needed, the incoming value is first captured under a different local name.
 
-:global rhCoreVersion "0.1.1"
+:global rhCoreVersion "0.1.3"
 
 # ---- small helpers -----------------------------------------------------
 
