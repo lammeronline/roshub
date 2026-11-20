@@ -1,0 +1,24 @@
+# Secrets and local router data — never commit
+rh-secrets*
+*.secret
+*.secrets.rsc
+secrets/
+.env
+*.env
+
+# Router exports / backups
+*.backup
+backups/
+export-*.rsc
+
+# Local tooling
+.venv/
+__pycache__/
+*.log
+tools/local.json
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

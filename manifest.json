@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "repo": "lammeronline/roshub",
+  "channel": "stable",
+  "min_routeros": "7.25",
+  "core": null,
+  "modules": {}
+}
