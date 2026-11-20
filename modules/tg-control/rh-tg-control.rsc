@@ -162,6 +162,11 @@
   :local atPos [:find $cmd "@"]
   :if ([:typeof $atPos] != "nil") do={ :set cmd [:pick $cmd 0 $atPos] }
 
+  # Chained as if/else-if (not a sequence of early ":return"s) because ":return"
+  # inside a one-line ":if (...) do={ stmt1 :return "" }" block (no ";" between
+  # statements) does not actually exit the function - both that reply and the
+  # final "unknown command" fallback ended up firing for every single message.
+  :local script ($rhTgCommands->$cmd)
   :if ($cmd = "confirm") do={
     :global rhTgRunConfirmed
     :local pending ($rhTgState->"pending")
@@ -179,37 +184,44 @@
     } else={
       [$rhTgSend chatId=$chatId text="no matching pending confirmation"]
     }
-    :return ""
-  }
-
-  :if ($cmd = "status") do={ [$rhTgSend chatId=$chatId text=[$rhTgBuiltinStatus]] :return "" }
-  :if ($cmd = "modules") do={ [$rhTgSend chatId=$chatId text=[$rhTgBuiltinModules]] :return "" }
-  :if ($cmd = "log") do={ [$rhTgSend chatId=$chatId text=[$rhTgBuiltinLog]] :return "" }
-  :if ($cmd = "help") do={ [$rhTgSend chatId=$chatId text=[$rhTgBuiltinHelp]] :return "" }
-
-  :if ([$rhTgIsDangerous cmd=$cmd] = 1) do={
-    :local tok [:tostr (([/system clock get time] . [:tostr $chatId]))]
-    :local pending ($rhTgState->"pending")
-    :local entry [:toarray ""]
-    :set ($entry->"cmd") $cmd
-    :set ($entry->"token") $tok
-    :set ($pending->[:tostr $chatId]) $entry
-    :set ($rhTgState->"pending") $pending
-    [$rhTgSend chatId=$chatId text=("type /confirm " . $tok . " within a minute to run /" . $cmd)]
-    :return ""
-  }
-
-  :local script ($rhTgCommands->$cmd)
-  :if ([:typeof $script] != "nothing") do={
-    :do {
-      /system script run $script
-    } on-error={
-      [$rhTgSend chatId=$chatId text=("/" . $cmd . " failed")]
+  } else={
+    :if ($cmd = "status") do={
+      [$rhTgSend chatId=$chatId text=[$rhTgBuiltinStatus]]
+    } else={
+      :if ($cmd = "modules") do={
+        [$rhTgSend chatId=$chatId text=[$rhTgBuiltinModules]]
+      } else={
+        :if ($cmd = "log") do={
+          [$rhTgSend chatId=$chatId text=[$rhTgBuiltinLog]]
+        } else={
+          :if ($cmd = "help") do={
+            [$rhTgSend chatId=$chatId text=[$rhTgBuiltinHelp]]
+          } else={
+            :if ([$rhTgIsDangerous cmd=$cmd] = 1) do={
+              :local tok [:tostr (([/system clock get time] . [:tostr $chatId]))]
+              :local pending ($rhTgState->"pending")
+              :local entry [:toarray ""]
+              :set ($entry->"cmd") $cmd
+              :set ($entry->"token") $tok
+              :set ($pending->[:tostr $chatId]) $entry
+              :set ($rhTgState->"pending") $pending
+              [$rhTgSend chatId=$chatId text=("type /confirm " . $tok . " within a minute to run /" . $cmd)]
+            } else={
+              :if ([:typeof $script] != "nothing") do={
+                :do {
+                  /system script run $script
+                } on-error={
+                  [$rhTgSend chatId=$chatId text=("/" . $cmd . " failed")]
+                }
+              } else={
+                [$rhTgSend chatId=$chatId text=("unknown command: /" . $cmd)]
+              }
+            }
+          }
+        }
+      }
     }
-    :return ""
   }
-
-  [$rhTgSend chatId=$chatId text=("unknown command: /" . $cmd)]
 }
 
 # offset is tracked directly on the (global) rhTgState map rather than a
