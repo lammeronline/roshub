@@ -58,16 +58,38 @@
   :return ($parsed->"result")
 }
 
-# args: chatId, text
+# The persistent inline keyboard attached to every built-in reply, so a chat
+# that only ever taps buttons never needs to type a command at all. /reboot
+# is deliberately left off it - tapping something dangerous by accident on a
+# phone screen is exactly what the danger is.
+:global rhTgMenuMarkup do={
+  :return [:serialize to=json ({"inline_keyboard"={{{"text"="📊 Status"; "callback_data"="status"}; {"text"="📦 Modules"; "callback_data"="modules"}}; {{"text"="📜 Log"; "callback_data"="log"}; {"text"="❓ Help"; "callback_data"="help"}}}})]
+}
+
+# args: chatId, text, markup (optional JSON string, e.g. rhTgMenuMarkup)
 :global rhTgSend do={
   :global rhTgApi
   :global rhLog
-  :local body [:serialize to=json ({"chat_id"=$chatId; "text"=$text})]
+  :local payload ({"chat_id"=$chatId; "text"=$text})
+  :local markupVal $markup
+  :if ([:typeof $markupVal] != "nothing" && $markupVal != "") do={
+    :set ($payload->"reply_markup") [:deserialize from=json $markupVal]
+  }
+  :local body [:serialize to=json $payload]
   :do {
     [$rhTgApi apiMethod="sendMessage" body=$body]
   } on-error={
     [$rhLog module="tg-control" level="warn" text=("could not send to chat " . $chatId)]
   }
+}
+
+# args: id (callback_query_id) - clears the loading spinner on the tapped button
+:global rhTgAnswerCallback do={
+  :global rhTgApi
+  :local body [:serialize to=json ({"callback_query_id"=$id})]
+  :do {
+    [$rhTgApi apiMethod="answerCallbackQuery" body=$body]
+  } on-error={ }
 }
 
 :global rhTgIsWhitelisted do={
@@ -83,8 +105,9 @@
 
 :global rhTgBuiltinStatus do={
   :global rhNow
+  :global rhRouterName
   :local res [/system resource print as-value]
-  :return ("ROSHub @ " . [$rhNow] . "\ncpu: " . ($res->"cpu-load") . "%\nfree mem: " . ($res->"free-memory") . "\nuptime: " . ($res->"uptime"))
+  :return ("🖥 " . [$rhRouterName] . " @ " . [$rhNow] . "\ncpu: " . ($res->"cpu-load") . "%\nfree mem: " . ($res->"free-memory") . "\nuptime: " . ($res->"uptime"))
 }
 
 :global rhTgBuiltinModules do={
@@ -109,7 +132,7 @@
 
 :global rhTgBuiltinHelp do={
   :global rhTgCommands
-  :local out "/status /modules /log /help /reboot (needs /confirm)"
+  :local out "/status /modules /log /help /menu /reboot (needs /confirm)"
   :foreach name,script in=$rhTgCommands do={
     :set out ($out . " /" . $name)
   }
@@ -153,6 +176,7 @@
   :global rhTgBuiltinModules
   :global rhTgBuiltinLog
   :global rhTgBuiltinHelp
+  :global rhTgMenuMarkup
 
   :if ([$rhTgIsWhitelisted chatId=$chatId] = 0) do={
     [$rhLog module="tg-control" level="warn" text=("ignored message from non-whitelisted chat " . $chatId)]
@@ -197,17 +221,20 @@
     }
   } else={
     :if ($cmd = "status") do={
-      [$rhTgSend chatId=$chatId text=[$rhTgBuiltinStatus]]
+      [$rhTgSend chatId=$chatId text=[$rhTgBuiltinStatus] markup=[$rhTgMenuMarkup]]
     } else={
       :if ($cmd = "modules") do={
-        [$rhTgSend chatId=$chatId text=[$rhTgBuiltinModules]]
+        [$rhTgSend chatId=$chatId text=[$rhTgBuiltinModules] markup=[$rhTgMenuMarkup]]
       } else={
         :if ($cmd = "log") do={
-          [$rhTgSend chatId=$chatId text=[$rhTgBuiltinLog]]
+          [$rhTgSend chatId=$chatId text=[$rhTgBuiltinLog] markup=[$rhTgMenuMarkup]]
         } else={
           :if ($cmd = "help") do={
-            [$rhTgSend chatId=$chatId text=[$rhTgBuiltinHelp]]
+            [$rhTgSend chatId=$chatId text=[$rhTgBuiltinHelp] markup=[$rhTgMenuMarkup]]
           } else={
+            :if ($cmd = "menu" || $cmd = "start") do={
+              [$rhTgSend chatId=$chatId text="ROSHub control menu:" markup=[$rhTgMenuMarkup]]
+            } else={
             :if ([$rhTgIsDangerous cmd=$cmd] = 1) do={
               :local tok [:tostr (([/system clock get time] . [:tostr $chatId]))]
               :local nowUptime [:tonum [/system resource get uptime]]
@@ -229,6 +256,7 @@
               } else={
                 [$rhTgSend chatId=$chatId text=("unknown command: /" . $cmd)]
               }
+            }
             }
           }
         }
@@ -258,6 +286,19 @@
           :local text ($msg->"text")
           :if ([:typeof $text] = "nothing") do={ :set text "" }
           [$rhTgHandleUpdate chatId=($chat->"id") fromId=($from->"id") text=$text]
+        }
+        # A tapped inline-keyboard button - its "data" is the bare command
+        # name (no leading "/"), routed through the same handler as if it had
+        # been typed, then the button's spinner is cleared either way.
+        :local cbq ($upd->"callback_query")
+        :if ([:typeof $cbq] != "nothing") do={
+          :local cbMsg ($cbq->"message")
+          :local cbChat ($cbMsg->"chat")
+          :local cbFrom ($cbq->"from")
+          :local cbData ($cbq->"data")
+          :if ([:typeof $cbData] = "nothing") do={ :set cbData "" }
+          [$rhTgHandleUpdate chatId=($cbChat->"id") fromId=($cbFrom->"id") text=("/" . $cbData)]
+          [$rhTgAnswerCallback id=($cbq->"id")]
         }
       }
     }

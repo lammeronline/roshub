@@ -3,16 +3,16 @@
   "repo": "lammeronline/roshub",
   "channel": "stable",
   "min_routeros": "7.25",
-  "core": {"version": "v0.1.10", "tag": "v0.21.0"},
+  "core": {"version": "v0.1.11", "tag": "v0.22.0"},
   "modules": {
     "selftest": {"version": "v0.1.1", "tag": "v0.1.1"},
-    "notify": {"version": "v0.1.4", "tag": "v0.19.0"},
+    "notify": {"version": "v0.2.0", "tag": "v0.22.0"},
     "notify-telegram": {"version": "v0.1.2", "tag": "v0.14.0"},
     "notify-email": {"version": "v0.1.2", "tag": "v0.14.0"},
     "wg": {"version": "v0.1.2", "tag": "v0.21.0"},
     "health": {"version": "v0.1.1", "tag": "v0.21.0"},
     "traffic": {"version": "v0.1.0", "tag": "v0.5.0"},
-    "tg-control": {"version": "v0.1.7", "tag": "v0.21.0"},
+    "tg-control": {"version": "v0.2.0", "tag": "v0.22.0"},
     "notify-ntfy": {"version": "v0.1.2", "tag": "v0.14.0"},
     "notify-webhook": {"version": "v0.1.2", "tag": "v0.14.0"}
   }

@@ -1,7 +1,7 @@
 {
   "name": "notify",
-  "version": "v0.1.4",
-  "min_core": "v0.1.8",
+  "version": "v0.2.0",
+  "min_core": "v0.1.11",
   "min_routeros": "v7.25",
   "files": ["rh-notify.rsc"],
   "scheduler": {"interval": "5m", "start-time": "startup"}

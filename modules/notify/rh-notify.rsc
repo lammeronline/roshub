@@ -20,11 +20,20 @@
 :global rhLog
 :global rhConfigGet
 :global rhEventSubscribe
+:global rhRouterName
 :global rhEvName
 :global rhEvLevel
 :global rhEvModule
 :global rhEvText
 :global rhEvSeq
+
+# args: level
+:global rhNotifyLevelIcon do={
+  :if ($level = "crit") do={ :return "🔴" }
+  :if ($level = "warn") do={ :return "⚠️" }
+  :if ($level = "info") do={ :return "ℹ️" }
+  :return "🔧"
+}
 
 :global rhNotifyQueue
 :global rhNotifyMsgText
@@ -87,7 +96,8 @@
   :if ([:typeof $minN] = "nothing") do={ :set minN 2 }
   :if ($lvlN < $minN) do={ :return "" }
 
-  :local line ("[" . $rhEvLevel . "] " . $rhEvModule . ": " . $rhEvText)
+  :local icon [$rhNotifyLevelIcon level=$rhEvLevel]
+  :local line ($icon . " " . [$rhRouterName] . " | " . $rhEvModule . ": " . $rhEvText)
   [$rhNotifySend text=$line]
 }
 

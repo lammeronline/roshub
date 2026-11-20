@@ -13,12 +13,18 @@
 # it reads back "nothing"/the local's own value, not the original. Anywhere a default
 # is needed, the incoming value is first captured under a different local name.
 
-:global rhCoreVersion "0.1.10"
+:global rhCoreVersion "0.1.11"
 
 # ---- small helpers -----------------------------------------------------
 
 :global rhNow do={
   :return ([/system clock get date] . " " . [/system clock get time])
+}
+
+# Fetched fresh every call (not cached) so a router rename takes effect
+# immediately - cheap, it's a single local /system identity read.
+:global rhRouterName do={
+  :return [/system identity get name]
 }
 
 # Re-entrancy guard for a scheduled module script that can be slow (a network
