@@ -84,6 +84,7 @@
     :return [:serialize to=json ({"inline_keyboard"={
       {{"text"="🔍 Check RouterOS update"; "callback_data"="sys-check"}};
       {{"text"="⬇️ Install RouterOS update"; "callback_data"="sys-update"}};
+      {{"text"="↩️ Rollback RouterOS"; "callback_data"="sys-downgrade"}};
       {{"text"="🔧 Upgrade RouterBOARD firmware"; "callback_data"="fw-upgrade"}};
       {{"text"="♻️ Reboot"; "callback_data"="reboot"}};
       {{"text"="⬅️ Back"; "callback_data"="nav:main"}}
@@ -99,7 +100,7 @@
 :global rhTgSectionOf do={
   :if ($name = "status" || $name = "modules" || $name = "log" || $name = "help") do={ :return "info" }
   :if ($name = "check-updates" || $name = "apply-updates") do={ :return "tools" }
-  :if ($name = "sys-check" || $name = "sys-update" || $name = "fw-upgrade" || $name = "reboot") do={ :return "system" }
+  :if ($name = "sys-check" || $name = "sys-update" || $name = "sys-downgrade" || $name = "fw-upgrade" || $name = "reboot") do={ :return "system" }
   :return "main"
 }
 
@@ -191,7 +192,7 @@
 
 :global rhTgBuiltinHelp do={
   :global rhTgCommands
-  :local out "❓ <b>Commands</b>\n/status /modules /log /help /menu /check-updates /apply-updates /sys-check /sys-update /fw-upgrade /reboot (needs /confirm)"
+  :local out "❓ <b>Commands</b>\n/status /modules /log /help /menu /check-updates /apply-updates /sys-check /sys-update /sys-downgrade /fw-upgrade /reboot (needs /confirm)"
   :foreach name,script in=$rhTgCommands do={
     :set out ($out . " /" . $name)
   }
@@ -288,6 +289,16 @@
   /system package update install
 }
 
+# args: chatId - reverts to the previously installed RouterOS package set
+# (what /system package downgrade does natively). Confirmed on the CHR stand
+# to reboot immediately, even with nothing meaningful to revert to - so this
+# always warns about that reboot up front rather than waiting to see.
+:global rhTgRunSysDowngrade do={
+  :global rhTgSend
+  [$rhTgSend chatId=$chatId text="↩️ Rolling back RouterOS - the router will reboot now."]
+  /system package downgrade
+}
+
 # args: chatId - upgrades RouterBOARD firmware to match the installed
 # RouterOS. Unlike a package install this does NOT reboot on its own - the
 # new firmware only takes effect after a manual reboot.
@@ -337,7 +348,7 @@
 # command name (without the leading "/"). sys-update and fw-upgrade are here
 # alongside reboot because both can leave the router rebooting or otherwise
 # unreachable on their own schedule, not just this module's.
-:global rhTgDangerous {"reboot"; "sys-update"; "fw-upgrade"}
+:global rhTgDangerous {"reboot"; "sys-update"; "sys-downgrade"; "fw-upgrade"}
 
 :global rhTgIsDangerous do={
   :global rhTgDangerous
@@ -353,6 +364,7 @@
   :global rhLog
   :global rhTgSend
   :global rhTgRunSysUpdate
+  :global rhTgRunSysDowngrade
   :global rhTgRunFwUpgrade
   :if ($cmd = "reboot") do={
     [$rhLog module="tg-control" level="crit" text=("reboot confirmed via chat " . $chatId)]
@@ -362,6 +374,10 @@
   :if ($cmd = "sys-update") do={
     [$rhLog module="tg-control" level="crit" text=("RouterOS update confirmed via chat " . $chatId)]
     [$rhTgRunSysUpdate chatId=$chatId]
+  }
+  :if ($cmd = "sys-downgrade") do={
+    [$rhLog module="tg-control" level="crit" text=("RouterOS downgrade confirmed via chat " . $chatId)]
+    [$rhTgRunSysDowngrade chatId=$chatId]
   }
   :if ($cmd = "fw-upgrade") do={
     [$rhLog module="tg-control" level="crit" text=("RouterBOARD upgrade confirmed via chat " . $chatId)]
