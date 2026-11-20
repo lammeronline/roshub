@@ -9,6 +9,7 @@
     "notify": {"version": "v0.1.0", "tag": "v0.2.0"},
     "notify-telegram": {"version": "v0.1.0", "tag": "v0.2.0"},
     "notify-email": {"version": "v0.1.0", "tag": "v0.2.0"},
-    "wg": {"version": "v0.1.0", "tag": "v0.3.0"}
+    "wg": {"version": "v0.1.0", "tag": "v0.3.0"},
+    "health": {"version": "v0.1.0", "tag": "v0.4.0"}
   }
 }
