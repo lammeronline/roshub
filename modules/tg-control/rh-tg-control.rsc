@@ -67,7 +67,8 @@
   :return [:serialize to=json ({"inline_keyboard"={
     {{"text"="📊 Status"; "callback_data"="status"}; {"text"="📦 Modules"; "callback_data"="modules"}};
     {{"text"="📜 Log"; "callback_data"="log"}; {"text"="❓ Help"; "callback_data"="help"}};
-    {{"text"="🔄 Check updates"; "callback_data"="check-updates"}; {"text"="♻️ Reboot"; "callback_data"="reboot"}}
+    {{"text"="🔄 Check updates"; "callback_data"="check-updates"}; {"text"="⬆️ Apply updates"; "callback_data"="apply-updates"}};
+    {{"text"="♻️ Reboot"; "callback_data"="reboot"}}
   }})]
 }
 
@@ -159,7 +160,7 @@
 
 :global rhTgBuiltinHelp do={
   :global rhTgCommands
-  :local out "❓ <b>Commands</b>\n/status /modules /log /help /menu /reboot (needs /confirm)"
+  :local out "❓ <b>Commands</b>\n/status /modules /log /help /menu /check-updates /apply-updates /reboot (needs /confirm)"
   :foreach name,script in=$rhTgCommands do={
     :set out ($out . " /" . $name)
   }
@@ -192,6 +193,42 @@
     :set anyUpdate 1
   }
   :if ($anyUpdate = 0) do={ :set out ($out . "\n✅ everything up to date") }
+  :return $out
+}
+
+# Actually installs whatever rhTgBuiltinCheckUpdates would list (modules
+# only - a core update still needs bootstrap.rsc run by hand, see its own
+# line below). Each rhPkgUpdate backs the module's files up to a ".bak"
+# script first, so a bad update can still be walked back with rhPkgRollback.
+:global rhTgBuiltinApplyUpdates do={
+  :global rhPkgList
+  :global rhPkgManifest
+  :global rhVerCmp
+  :global rhCoreVersion
+  :global rhPkgUpdate
+  :local mods [$rhPkgList]
+  :local manifest [$rhPkgManifest]
+  :local availMods ($manifest->"modules")
+  :local out "⬆️ <b>Applying updates</b>"
+  :local any 0
+  :foreach name,rec in=$mods do={
+    :local avail ($availMods->$name)
+    :if ([:typeof $avail] != "nothing" && [$rhVerCmp ($avail->"version") ($rec->"version")] > 0) do={
+      :set any 1
+      :do {
+        [$rhPkgUpdate module=$name]
+        :set out ($out . "\n✅ " . $name . " → <code>" . ($avail->"version") . "</code>")
+      } on-error={
+        :set out ($out . "\n❌ " . $name . " failed - see /log")
+      }
+    }
+  }
+  :local coreAvail ($manifest->"core")
+  :if ([:typeof $coreAvail] != "nothing" && [$rhVerCmp ($coreAvail->"version") $rhCoreVersion] > 0) do={
+    :set out ($out . "\nℹ️ core <code>v" . $rhCoreVersion . "</code> → <code>" . ($coreAvail->"version") . "</code> available - re-run bootstrap.rsc by hand to apply")
+    :set any 1
+  }
+  :if ($any = 0) do={ :set out ($out . "\n✅ nothing to update") }
   :return $out
 }
 
@@ -260,6 +297,7 @@
   :global rhTgSend
   :global rhTgRenderView
   :global rhTgIsView
+  :global rhTgBuiltinApplyUpdates
   :global rhTgMenuMarkup
 
   :if ([$rhTgIsWhitelisted chatId=$chatId] = 0) do={
@@ -307,6 +345,9 @@
     :if ([$rhTgIsView view=$cmd] = 1) do={
       [$rhTgSend chatId=$chatId text=[$rhTgRenderView view=$cmd] markup=[$rhTgMenuMarkup]]
     } else={
+    :if ($cmd = "apply-updates") do={
+      [$rhTgSend chatId=$chatId text=[$rhTgBuiltinApplyUpdates] markup=[$rhTgMenuMarkup]]
+    } else={
       :if ([$rhTgIsDangerous cmd=$cmd] = 1) do={
         :local tok [:tostr (([/system clock get time] . [:tostr $chatId]))]
         :local nowUptime [:tonum [/system resource get uptime]]
@@ -329,6 +370,7 @@
           [$rhTgSend chatId=$chatId text=("unknown command: /" . $cmd)]
         }
       }
+    }
     }
   }
 }
