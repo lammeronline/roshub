@@ -1,6 +1,6 @@
 {
   "name": "tg-control",
-  "version": "v0.8.0",
+  "version": "v0.9.0",
   "min_core": "v0.1.11",
   "min_routeros": "v7.25",
   "files": ["rh-tg-control.rsc"],

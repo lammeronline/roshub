@@ -18,6 +18,8 @@
 :global rhStateLoad
 :global rhStateSaveThrottled
 :global rhPkgList
+:global rhPkgInstall
+:global rhPkgRemove
 :global rhLogGet
 :global rhNow
 :global rhLockTry
@@ -77,6 +79,7 @@
   :if ($sectionVal = "tools") do={
     :return [:serialize to=json ({"inline_keyboard"={
       {{"text"="🔄 Check updates"; "callback_data"="check-updates"}; {"text"="⬆️ Apply updates"; "callback_data"="apply-updates"}};
+      {{"text"="🛠 Manage modules"; "callback_data"="nav:modmenu"}};
       {{"text"="⬅️ Back"; "callback_data"="nav:main"}}
     }})]
   }
@@ -282,6 +285,107 @@
   :return $out
 }
 
+# One button per module known to manifest.json (whether installed or not),
+# two per row, leading to "mod:<name>"'s own detail screen - lets install/
+# remove/enable/disable reach any module without a fixed button per module.
+:global rhTgModulesListMarkup do={
+  :global rhPkgManifest
+  :local manifest [$rhPkgManifest]
+  :local availMods ($manifest->"modules")
+  :local names [:toarray ""]
+  :foreach name,rec in=$availMods do={
+    :if ($name != "selftest") do={ :set ($names->[:len $names]) $name }
+  }
+  :local rows [:toarray ""]
+  :local i 0
+  :local n [:len $names]
+  :while ($i < $n) do={
+    :local row [:toarray ""]
+    :set ($row->0) {"text"=($names->$i); "callback_data"=("mod:" . ($names->$i))}
+    :if (($i + 1) < $n) do={
+      :set ($row->1) {"text"=($names->($i+1)); "callback_data"=("mod:" . ($names->($i+1)))}
+    }
+    :set ($rows->[:len $rows]) $row
+    :set i ($i + 2)
+  }
+  :set ($rows->[:len $rows]) {{"text"="⬅️ Back"; "callback_data"="nav:tools"}}
+  :return [:serialize to=json ({"inline_keyboard"=$rows})]
+}
+
+# args: name - installed version (if any), available version, and whether
+# its scheduler (if module.json declares one) is currently running or paused.
+:global rhTgModuleDetail do={
+  :global rhPkgList
+  :global rhPkgManifest
+  :local mods [$rhPkgList]
+  :local manifest [$rhPkgManifest]
+  :local rec ($mods->$name)
+  :local avail (($manifest->"modules")->$name)
+  :local out ("📦 <b>" . $name . "</b>")
+  :if ([:typeof $rec] = "nothing") do={
+    :set out ($out . "\nstatus: <i>not installed</i>")
+    :if ([:typeof $avail] != "nothing") do={
+      :set out ($out . "\navailable: <code>" . ($avail->"version") . "</code>")
+    }
+  } else={
+    :set out ($out . "\nstatus: <b>installed</b>\nversion: <code>" . ($rec->"version") . "</code>")
+    :local mainName (($rec->"files")->0)
+    :if ([:len [/system scheduler find name=$mainName]] > 0) do={
+      :if ([/system scheduler get [find name=$mainName] disabled] = true) do={
+        :set out ($out . "\nscheduler: ⏸ <i>disabled</i>")
+      } else={
+        :set out ($out . "\nscheduler: ▶️ <i>running</i>")
+      }
+    }
+  }
+  :return $out
+}
+
+# args: name - buttons matching rhTgModuleDetail's state: Install when
+# missing; Enable/Disable (only if it has a scheduler at all) and Remove
+# when installed.
+:global rhTgModuleMarkup do={
+  :global rhPkgList
+  :local mods [$rhPkgList]
+  :local rec ($mods->$name)
+  :local rows [:toarray ""]
+  :if ([:typeof $rec] = "nothing") do={
+    :set ($rows->0) {{"text"="📥 Install"; "callback_data"=("modinstall:" . $name)}}
+  } else={
+    :local mainName (($rec->"files")->0)
+    :if ([:len [/system scheduler find name=$mainName]] > 0) do={
+      :if ([/system scheduler get [find name=$mainName] disabled] = true) do={
+        :set ($rows->[:len $rows]) {{"text"="▶️ Enable"; "callback_data"=("modtoggle:" . $name)}}
+      } else={
+        :set ($rows->[:len $rows]) {{"text"="⏸ Disable"; "callback_data"=("modtoggle:" . $name)}}
+      }
+    }
+    :set ($rows->[:len $rows]) {{"text"="🗑 Remove"; "callback_data"=("modremove:" . $name)}}
+  }
+  :set ($rows->[:len $rows]) {{"text"="⬅️ Back"; "callback_data"="nav:modmenu"}}
+  :return [:serialize to=json ({"inline_keyboard"=$rows})]
+}
+
+# args: chatId, messageId (optional), cmd, promptText, backSection - shared
+# by the static dangerous commands (reboot, sys-*) and the dynamic
+# "modremove:<name>" one, so there is exactly one place that creates a
+# pending confirmation and its Confirm/Cancel buttons.
+:global rhTgRequestConfirm do={
+  :global rhTgState
+  :global rhTgReply
+  :local tok [:tostr (([/system clock get time] . [:tostr $chatId]))]
+  :local nowUptime [:tonum [/system resource get uptime]]
+  :local pending ($rhTgState->"pending")
+  :local entry [:toarray ""]
+  :set ($entry->"cmd") $cmd
+  :set ($entry->"token") $tok
+  :set ($entry->"expires") ($nowUptime + 60)
+  :set ($pending->[:tostr $chatId]) $entry
+  :set ($rhTgState->"pending") $pending
+  :local confirmMarkup [:serialize to=json ({"inline_keyboard"={{{"text"="✅ Confirm"; "callback_data"=("confirm:" . $tok)}}; {{"text"="❌ Cancel"; "callback_data"=("nav:" . $backSection)}}}})]
+  [$rhTgReply chatId=$chatId messageId=$messageId text=$promptText markup=$confirmMarkup]
+}
+
 # Read-only: asks RouterOS to check its update channel, waits a few seconds
 # for that check to come back, then reports what it found. Does NOT download
 # or install anything - see rhTgRunConfirmed's "sys-update" for that.
@@ -407,6 +511,19 @@
     [$rhLog module="tg-control" level="crit" text=("RouterBOARD upgrade confirmed via chat " . $chatId)]
     [$rhTgRunFwUpgrade chatId=$chatId messageId=$messageId]
   }
+  :local modremovePrefix [:pick $cmd 0 10]
+  :if ($modremovePrefix = "modremove:") do={
+    :global rhPkgRemove
+    :global rhTgModuleMarkup
+    :local modName [:pick $cmd 10 [:len $cmd]]
+    [$rhLog module="tg-control" level="crit" text=($modName . " removal confirmed via chat " . $chatId)]
+    :do {
+      [$rhPkgRemove module=$modName]
+      [$rhTgReply chatId=$chatId messageId=$messageId text=("🗑 " . $modName . " removed") markup=[$rhTgModuleMarkup name=$modName]]
+    } on-error={
+      [$rhTgReply chatId=$chatId messageId=$messageId text=("❌ failed to remove " . $modName) markup=[$rhTgModuleMarkup name=$modName]]
+    }
+  }
 }
 
 # args: chatId, fromId, text
@@ -423,6 +540,7 @@
   :global rhTgSectionOf
   :global rhTgBuiltinApplyUpdates
   :global rhTgMenuMarkup
+  :global rhTgRequestConfirm
 
   :if ([$rhTgIsWhitelisted chatId=$chatId] = 0) do={
     [$rhLog module="tg-control" level="warn" text=("ignored message from non-whitelisted chat " . $chatId)]
@@ -473,17 +591,7 @@
       [$rhTgSend chatId=$chatId text=[$rhTgBuiltinApplyUpdates] markup=[$rhTgMenuMarkup section=[$rhTgSectionOf name=$cmd]]]
     } else={
       :if ([$rhTgIsDangerous cmd=$cmd] = 1) do={
-        :local tok [:tostr (([/system clock get time] . [:tostr $chatId]))]
-        :local nowUptime [:tonum [/system resource get uptime]]
-        :local pending ($rhTgState->"pending")
-        :local entry [:toarray ""]
-        :set ($entry->"cmd") $cmd
-        :set ($entry->"token") $tok
-        :set ($entry->"expires") ($nowUptime + 60)
-        :set ($pending->[:tostr $chatId]) $entry
-        :set ($rhTgState->"pending") $pending
-        :local confirmMarkup [:serialize to=json ({"inline_keyboard"={{{"text"=("✅ Confirm /" . $cmd); "callback_data"=("confirm:" . $tok)}}}})]
-        [$rhTgSend chatId=$chatId text=("⚠️ type /confirm " . $tok . " within a minute to run /" . $cmd . ", or just tap below:") markup=$confirmMarkup]
+        [$rhTgRequestConfirm chatId=$chatId cmd=$cmd promptText=("⚠️ Confirm running /" . $cmd . "?") backSection=[$rhTgSectionOf name=$cmd]]
       } else={
         :if ([:typeof $script] != "nothing") do={
           :do {
@@ -537,64 +645,98 @@
           :local cbMsgId ($cbMsg->"message_id")
           :local cbData ($cbq->"data")
           :if ([:typeof $cbData] = "nothing") do={ :set cbData "" }
-          :local navPrefix [:pick $cbData 0 4]
-          :local confirmPrefix [:pick $cbData 0 8]
+          :local handled 0
           :if ([$rhTgIsWhitelisted chatId=$cbChatId] = 0) do={
             [$rhLog module="tg-control" level="warn" text=("ignored button from non-whitelisted chat " . $cbChatId)]
-          } else={
-            :if ($navPrefix = "nav:") do={
-              :local section [:pick $cbData 4 [:len $cbData]]
-              :local title "🤖 <b>ROSHub control menu</b>"
-              :if ($section = "info") do={ :set title "ℹ️ <b>Info</b>" }
-              :if ($section = "tools") do={ :set title "🧰 <b>Tools</b>" }
-              :if ($section = "system") do={ :set title "⚙️ <b>System</b>" }
-              [$rhTgReply chatId=$cbChatId messageId=$cbMsgId text=$title markup=[$rhTgMenuMarkup section=$section]]
+            :set handled 1
+          }
+          # Flat if-chain (each guarded by "$handled = 0") rather than nested
+          # if/else, on purpose - a deeply nested chain here got hard to
+          # extend without miscounting closing braces every time a new
+          # prefix (mod:/modinstall:/...) was added.
+          :if ($handled = 0 && [:pick $cbData 0 4] = "nav:") do={
+            :local section [:pick $cbData 4 [:len $cbData]]
+            :local title "🤖 <b>ROSHub control menu</b>"
+            :if ($section = "info") do={ :set title "ℹ️ <b>Info</b>" }
+            :if ($section = "tools") do={ :set title "🧰 <b>Tools</b>" }
+            :if ($section = "system") do={ :set title "⚙️ <b>System</b>" }
+            :if ($section = "modmenu") do={ :set title "🛠 <b>Manage modules</b>" }
+            :local navMarkup [$rhTgMenuMarkup section=$section]
+            :if ($section = "modmenu") do={ :set navMarkup [$rhTgModulesListMarkup] }
+            [$rhTgReply chatId=$cbChatId messageId=$cbMsgId text=$title markup=$navMarkup]
+            :set handled 1
+          }
+          :if ($handled = 0 && [:pick $cbData 0 8] = "confirm:") do={
+            :local tok [:pick $cbData 8 [:len $cbData]]
+            :local pending ($rhTgState->"pending")
+            :local chatKey [:tostr $cbChatId]
+            :local entry ($pending->$chatKey)
+            :local nowUptime [:tonum [/system resource get uptime]]
+            :if ([:typeof $entry] != "nothing" && ($entry->"token") = $tok && $nowUptime <= ($entry->"expires")) do={
+              :local dcmd ($entry->"cmd")
+              :local newPending [:toarray ""]
+              :foreach k,v in=$pending do={
+                :if ($k != $chatKey) do={ :set ($newPending->$k) $v }
+              }
+              :set pending $newPending
+              :set ($rhTgState->"pending") $pending
+              [$rhTgRunConfirmed chatId=$cbChatId cmd=$dcmd messageId=$cbMsgId]
             } else={
-              :if ($confirmPrefix = "confirm:") do={
-                :local tok [:pick $cbData 8 [:len $cbData]]
-                :local pending ($rhTgState->"pending")
-                :local chatKey [:tostr $cbChatId]
-                :local entry ($pending->$chatKey)
-                :local nowUptime [:tonum [/system resource get uptime]]
-                :if ([:typeof $entry] != "nothing" && ($entry->"token") = $tok && $nowUptime <= ($entry->"expires")) do={
-                  :local dcmd ($entry->"cmd")
-                  :local newPending [:toarray ""]
-                  :foreach k,v in=$pending do={
-                    :if ($k != $chatKey) do={ :set ($newPending->$k) $v }
-                  }
-                  :set pending $newPending
-                  :set ($rhTgState->"pending") $pending
-                  [$rhTgRunConfirmed chatId=$cbChatId cmd=$dcmd messageId=$cbMsgId]
+              [$rhTgReply chatId=$cbChatId messageId=$cbMsgId text="no matching pending confirmation" markup=[$rhTgMenuMarkup section="system"]]
+            }
+            :set handled 1
+          }
+          :if ($handled = 0 && [:pick $cbData 0 4] = "mod:") do={
+            :local modName [:pick $cbData 4 [:len $cbData]]
+            [$rhTgReply chatId=$cbChatId messageId=$cbMsgId text=[$rhTgModuleDetail name=$modName] markup=[$rhTgModuleMarkup name=$modName]]
+            :set handled 1
+          }
+          :if ($handled = 0 && [:pick $cbData 0 11] = "modinstall:") do={
+            :local modName [:pick $cbData 11 [:len $cbData]]
+            :do {
+              [$rhPkgInstall module=$modName]
+              [$rhTgReply chatId=$cbChatId messageId=$cbMsgId text=[$rhTgModuleDetail name=$modName] markup=[$rhTgModuleMarkup name=$modName]]
+            } on-error={
+              [$rhTgReply chatId=$cbChatId messageId=$cbMsgId text=("❌ failed to install " . $modName . " - see /log") markup=[$rhTgModuleMarkup name=$modName]]
+            }
+            :set handled 1
+          }
+          :if ($handled = 0 && [:pick $cbData 0 10] = "modtoggle:") do={
+            :local modName [:pick $cbData 10 [:len $cbData]]
+            :local rec (($rhPkgList->$modName))
+            :if ([:typeof $rec] != "nothing") do={
+              :local mainName (($rec->"files")->0)
+              :if ([:len [/system scheduler find name=$mainName]] > 0) do={
+                :if ([/system scheduler get [find name=$mainName] disabled] = true) do={
+                  /system scheduler enable [find name=$mainName]
                 } else={
-                  [$rhTgReply chatId=$cbChatId messageId=$cbMsgId text="no matching pending confirmation" markup=[$rhTgMenuMarkup section="system"]]
-                }
-              } else={
-                :if ([$rhTgIsView view=$cbData] = 1) do={
-                  [$rhTgReply chatId=$cbChatId messageId=$cbMsgId text=[$rhTgRenderView view=$cbData] markup=[$rhTgMenuMarkup section=[$rhTgSectionOf name=$cbData]]]
-                } else={
-                  :if ($cbData = "apply-updates") do={
-                    [$rhTgReply chatId=$cbChatId messageId=$cbMsgId text=[$rhTgBuiltinApplyUpdates] markup=[$rhTgMenuMarkup section=[$rhTgSectionOf name=$cbData]]]
-                  } else={
-                    :if ([$rhTgIsDangerous cmd=$cbData] = 1) do={
-                      :local tok2 [:tostr (([/system clock get time] . [:tostr $cbChatId]))]
-                      :local nowUptime2 [:tonum [/system resource get uptime]]
-                      :local pending2 ($rhTgState->"pending")
-                      :local entry2 [:toarray ""]
-                      :set ($entry2->"cmd") $cbData
-                      :set ($entry2->"token") $tok2
-                      :set ($entry2->"expires") ($nowUptime2 + 60)
-                      :set ($pending2->[:tostr $cbChatId]) $entry2
-                      :set ($rhTgState->"pending") $pending2
-                      :local confirmMarkup2 [:serialize to=json ({"inline_keyboard"={{{"text"=("✅ Confirm /" . $cbData); "callback_data"=("confirm:" . $tok2)}}; {{"text"="❌ Cancel"; "callback_data"=("nav:" . [$rhTgSectionOf name=$cbData])}}}})]
-                      [$rhTgReply chatId=$cbChatId messageId=$cbMsgId text=("⚠️ Confirm running /" . $cbData . "?") markup=$confirmMarkup2]
-                    } else={
-                      :local cbFrom ($cbq->"from")
-                      [$rhTgHandleUpdate chatId=$cbChatId fromId=($cbFrom->"id") text=("/" . $cbData)]
-                    }
-                  }
+                  /system scheduler disable [find name=$mainName]
                 }
               }
             }
+            [$rhTgReply chatId=$cbChatId messageId=$cbMsgId text=[$rhTgModuleDetail name=$modName] markup=[$rhTgModuleMarkup name=$modName]]
+            :set handled 1
+          }
+          :if ($handled = 0 && [:pick $cbData 0 10] = "modremove:") do={
+            :local modName [:pick $cbData 10 [:len $cbData]]
+            [$rhTgRequestConfirm chatId=$cbChatId messageId=$cbMsgId cmd=$cbData promptText=("⚠️ Remove " . $modName . "?") backSection="modmenu"]
+            :set handled 1
+          }
+          :if ($handled = 0 && [$rhTgIsView view=$cbData] = 1) do={
+            [$rhTgReply chatId=$cbChatId messageId=$cbMsgId text=[$rhTgRenderView view=$cbData] markup=[$rhTgMenuMarkup section=[$rhTgSectionOf name=$cbData]]]
+            :set handled 1
+          }
+          :if ($handled = 0 && $cbData = "apply-updates") do={
+            [$rhTgReply chatId=$cbChatId messageId=$cbMsgId text=[$rhTgBuiltinApplyUpdates] markup=[$rhTgMenuMarkup section=[$rhTgSectionOf name=$cbData]]]
+            :set handled 1
+          }
+          :if ($handled = 0 && [$rhTgIsDangerous cmd=$cbData] = 1) do={
+            [$rhTgRequestConfirm chatId=$cbChatId messageId=$cbMsgId cmd=$cbData promptText=("⚠️ Confirm running /" . $cbData . "?") backSection=[$rhTgSectionOf name=$cbData]]
+            :set handled 1
+          }
+          :if ($handled = 0) do={
+            :local cbFrom ($cbq->"from")
+            [$rhTgHandleUpdate chatId=$cbChatId fromId=($cbFrom->"id") text=("/" . $cbData)]
           }
           [$rhTgAnswerCallback id=($cbq->"id")]
         }
