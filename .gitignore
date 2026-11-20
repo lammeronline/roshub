@@ -17,6 +17,9 @@ __pycache__/
 *.log
 tools/local.json
 
+# Local test stand (internal network, IPs — not for public repo)
+docs/TESTBED.md
+
 # OS / editors
 .DS_Store
 Thumbs.db
