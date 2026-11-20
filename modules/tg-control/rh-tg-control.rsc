@@ -141,6 +141,24 @@
   }
 }
 
+# args: chatId, text, markup (optional), messageId (optional) - edits that
+# message in place if messageId is given (a button tap always has one),
+# otherwise sends a fresh message (a typed command has no existing card to
+# edit into). Every reply in this module goes through here now, so a button
+# tap never has to spawn a second message next to the menu card - including
+# the dangerous-command confirm prompt and its result, which used to always
+# send a separate message even when started from a button.
+:global rhTgReply do={
+  :global rhTgSend
+  :global rhTgEditMessage
+  :local midVal $messageId
+  :if ([:typeof $midVal] != "nothing" && $midVal != "") do={
+    [$rhTgEditMessage chatId=$chatId messageId=$midVal text=$text markup=$markup]
+  } else={
+    [$rhTgSend chatId=$chatId text=$text markup=$markup]
+  }
+}
+
 # args: id (callback_query_id) - clears the loading spinner on the tapped button
 :global rhTgAnswerCallback do={
   :global rhTgApi
@@ -280,35 +298,40 @@
   :return $out
 }
 
-# args: chatId - runs the actual RouterOS package install (downloads +
-# installs + reboots on its own once ready, per RouterOS's own behaviour -
-# not something this module controls or can prevent).
+# args: chatId, messageId (optional) - runs the actual RouterOS package
+# install (downloads + installs + reboots on its own once ready, per
+# RouterOS's own behaviour - not something this module controls or can
+# prevent).
 :global rhTgRunSysUpdate do={
-  :global rhTgSend
-  [$rhTgSend chatId=$chatId text="⬇️ Installing RouterOS update - the router will reboot on its own once it's done."]
+  :global rhTgReply
+  [$rhTgReply chatId=$chatId messageId=$messageId text="⬇️ Installing RouterOS update - the router will reboot on its own once it's done."]
   /system package update install
 }
 
-# args: chatId - reverts to the previously installed RouterOS package set
-# (what /system package downgrade does natively). Confirmed on the CHR stand
-# to reboot immediately, even with nothing meaningful to revert to - so this
-# always warns about that reboot up front rather than waiting to see.
+# args: chatId, messageId (optional) - reverts to the previously installed
+# RouterOS package set (what /system package downgrade does natively).
+# Confirmed on the CHR stand to reboot immediately, even with nothing
+# meaningful to revert to - so this always warns about that reboot up front
+# rather than waiting to see.
 :global rhTgRunSysDowngrade do={
-  :global rhTgSend
-  [$rhTgSend chatId=$chatId text="↩️ Rolling back RouterOS - the router will reboot now."]
+  :global rhTgReply
+  [$rhTgReply chatId=$chatId messageId=$messageId text="↩️ Rolling back RouterOS - the router will reboot now."]
   /system package downgrade
 }
 
-# args: chatId - upgrades RouterBOARD firmware to match the installed
-# RouterOS. Unlike a package install this does NOT reboot on its own - the
-# new firmware only takes effect after a manual reboot.
+# args: chatId, messageId (optional) - upgrades RouterBOARD firmware to
+# match the installed RouterOS. Unlike a package install this does NOT
+# reboot on its own - the new firmware only takes effect after a manual
+# reboot.
 :global rhTgRunFwUpgrade do={
-  :global rhTgSend
+  :global rhTgReply
+  :global rhTgMenuMarkup
+  :global rhTgSectionOf
   :do {
     /system routerboard upgrade
-    [$rhTgSend chatId=$chatId text="🔧 RouterBOARD firmware upgraded - run /reboot for it to take effect."]
+    [$rhTgReply chatId=$chatId messageId=$messageId text="🔧 RouterBOARD firmware upgraded - run /reboot for it to take effect." markup=[$rhTgMenuMarkup section=[$rhTgSectionOf name="fw-upgrade"]]]
   } on-error={
-    [$rhTgSend chatId=$chatId text="❌ RouterBOARD upgrade failed or nothing to upgrade."]
+    [$rhTgReply chatId=$chatId messageId=$messageId text="❌ RouterBOARD upgrade failed or nothing to upgrade." markup=[$rhTgMenuMarkup section=[$rhTgSectionOf name="fw-upgrade"]]]
   }
 }
 
@@ -359,29 +382,30 @@
   :return $found
 }
 
-# args: chatId, cmd - runs a confirmed dangerous command by name
+# args: chatId, cmd, messageId (optional) - runs a confirmed dangerous
+# command by name
 :global rhTgRunConfirmed do={
   :global rhLog
-  :global rhTgSend
+  :global rhTgReply
   :global rhTgRunSysUpdate
   :global rhTgRunSysDowngrade
   :global rhTgRunFwUpgrade
   :if ($cmd = "reboot") do={
     [$rhLog module="tg-control" level="crit" text=("reboot confirmed via chat " . $chatId)]
-    [$rhTgSend chatId=$chatId text="rebooting now"]
+    [$rhTgReply chatId=$chatId messageId=$messageId text="rebooting now"]
     /system reboot
   }
   :if ($cmd = "sys-update") do={
     [$rhLog module="tg-control" level="crit" text=("RouterOS update confirmed via chat " . $chatId)]
-    [$rhTgRunSysUpdate chatId=$chatId]
+    [$rhTgRunSysUpdate chatId=$chatId messageId=$messageId]
   }
   :if ($cmd = "sys-downgrade") do={
     [$rhLog module="tg-control" level="crit" text=("RouterOS downgrade confirmed via chat " . $chatId)]
-    [$rhTgRunSysDowngrade chatId=$chatId]
+    [$rhTgRunSysDowngrade chatId=$chatId messageId=$messageId]
   }
   :if ($cmd = "fw-upgrade") do={
     [$rhLog module="tg-control" level="crit" text=("RouterBOARD upgrade confirmed via chat " . $chatId)]
-    [$rhTgRunFwUpgrade chatId=$chatId]
+    [$rhTgRunFwUpgrade chatId=$chatId messageId=$messageId]
   }
 }
 
@@ -498,27 +522,25 @@
           :if ([:typeof $text] = "nothing") do={ :set text "" }
           [$rhTgHandleUpdate chatId=($chat->"id") fromId=($from->"id") text=$text]
         }
-        # A tapped inline-keyboard button. "nav:<section>" is pure navigation
-        # (never runs anything), a read-only view (rhTgIsView) edits the menu
-        # card in place to show that view with its section's keyboard still
-        # attached - so clicking through Status/Modules/Log/Help/menu
-        # sections updates one message instead of spamming a new one per
-        # tap. Anything else (a real control action, e.g. reboot/sys-update/
-        # fw-upgrade/apply-updates) is routed through the normal command
-        # handler exactly as if typed, so it still goes through the
-        # whitelist/dangerous/confirm machinery and sends its own separate
-        # message, not an edit.
+        # A tapped inline-keyboard button. Every path below ends up calling
+        # rhTgReply with this button's own message_id, so whatever happens -
+        # navigation, a read-only view, a confirm prompt, running a confirmed
+        # dangerous command, or a direct action like apply-updates - edits
+        # the SAME card in place. Nothing from a button tap ever spawns a
+        # second message next to the menu; only a typed command (which has
+        # no existing card to edit into) still gets its own reply.
         :local cbq ($upd->"callback_query")
         :if ([:typeof $cbq] != "nothing") do={
           :local cbMsg ($cbq->"message")
           :local cbChat ($cbMsg->"chat")
-          :local cbFrom ($cbq->"from")
+          :local cbChatId ($cbChat->"id")
+          :local cbMsgId ($cbMsg->"message_id")
           :local cbData ($cbq->"data")
           :if ([:typeof $cbData] = "nothing") do={ :set cbData "" }
           :local navPrefix [:pick $cbData 0 4]
           :local confirmPrefix [:pick $cbData 0 8]
-          :if ([$rhTgIsWhitelisted chatId=($cbChat->"id")] = 0) do={
-            [$rhLog module="tg-control" level="warn" text=("ignored button from non-whitelisted chat " . ($cbChat->"id"))]
+          :if ([$rhTgIsWhitelisted chatId=$cbChatId] = 0) do={
+            [$rhLog module="tg-control" level="warn" text=("ignored button from non-whitelisted chat " . $cbChatId)]
           } else={
             :if ($navPrefix = "nav:") do={
               :local section [:pick $cbData 4 [:len $cbData]]
@@ -526,17 +548,51 @@
               :if ($section = "info") do={ :set title "ℹ️ <b>Info</b>" }
               :if ($section = "tools") do={ :set title "🧰 <b>Tools</b>" }
               :if ($section = "system") do={ :set title "⚙️ <b>System</b>" }
-              [$rhTgEditMessage chatId=($cbChat->"id") messageId=($cbMsg->"message_id") text=$title markup=[$rhTgMenuMarkup section=$section]]
+              [$rhTgReply chatId=$cbChatId messageId=$cbMsgId text=$title markup=[$rhTgMenuMarkup section=$section]]
             } else={
               :if ($confirmPrefix = "confirm:") do={
                 :local tok [:pick $cbData 8 [:len $cbData]]
-                [$rhTgHandleUpdate chatId=($cbChat->"id") fromId=($cbFrom->"id") text=("/confirm " . $tok)]
+                :local pending ($rhTgState->"pending")
+                :local chatKey [:tostr $cbChatId]
+                :local entry ($pending->$chatKey)
+                :local nowUptime [:tonum [/system resource get uptime]]
+                :if ([:typeof $entry] != "nothing" && ($entry->"token") = $tok && $nowUptime <= ($entry->"expires")) do={
+                  :local dcmd ($entry->"cmd")
+                  :local newPending [:toarray ""]
+                  :foreach k,v in=$pending do={
+                    :if ($k != $chatKey) do={ :set ($newPending->$k) $v }
+                  }
+                  :set pending $newPending
+                  :set ($rhTgState->"pending") $pending
+                  [$rhTgRunConfirmed chatId=$cbChatId cmd=$dcmd messageId=$cbMsgId]
+                } else={
+                  [$rhTgReply chatId=$cbChatId messageId=$cbMsgId text="no matching pending confirmation" markup=[$rhTgMenuMarkup section="system"]]
+                }
               } else={
-              :if ([$rhTgIsView view=$cbData] = 1) do={
-                [$rhTgEditMessage chatId=($cbChat->"id") messageId=($cbMsg->"message_id") text=[$rhTgRenderView view=$cbData] markup=[$rhTgMenuMarkup section=[$rhTgSectionOf name=$cbData]]]
-              } else={
-                [$rhTgHandleUpdate chatId=($cbChat->"id") fromId=($cbFrom->"id") text=("/" . $cbData)]
-              }
+                :if ([$rhTgIsView view=$cbData] = 1) do={
+                  [$rhTgReply chatId=$cbChatId messageId=$cbMsgId text=[$rhTgRenderView view=$cbData] markup=[$rhTgMenuMarkup section=[$rhTgSectionOf name=$cbData]]]
+                } else={
+                  :if ($cbData = "apply-updates") do={
+                    [$rhTgReply chatId=$cbChatId messageId=$cbMsgId text=[$rhTgBuiltinApplyUpdates] markup=[$rhTgMenuMarkup section=[$rhTgSectionOf name=$cbData]]]
+                  } else={
+                    :if ([$rhTgIsDangerous cmd=$cbData] = 1) do={
+                      :local tok2 [:tostr (([/system clock get time] . [:tostr $cbChatId]))]
+                      :local nowUptime2 [:tonum [/system resource get uptime]]
+                      :local pending2 ($rhTgState->"pending")
+                      :local entry2 [:toarray ""]
+                      :set ($entry2->"cmd") $cbData
+                      :set ($entry2->"token") $tok2
+                      :set ($entry2->"expires") ($nowUptime2 + 60)
+                      :set ($pending2->[:tostr $cbChatId]) $entry2
+                      :set ($rhTgState->"pending") $pending2
+                      :local confirmMarkup2 [:serialize to=json ({"inline_keyboard"={{{"text"=("✅ Confirm /" . $cbData); "callback_data"=("confirm:" . $tok2)}}; {{"text"="❌ Cancel"; "callback_data"=("nav:" . [$rhTgSectionOf name=$cbData])}}}})]
+                      [$rhTgReply chatId=$cbChatId messageId=$cbMsgId text=("⚠️ Confirm running /" . $cbData . "?") markup=$confirmMarkup2]
+                    } else={
+                      :local cbFrom ($cbq->"from")
+                      [$rhTgHandleUpdate chatId=$cbChatId fromId=($cbFrom->"id") text=("/" . $cbData)]
+                    }
+                  }
+                }
               }
             }
           }
