@@ -58,19 +58,24 @@
   :return ($parsed->"result")
 }
 
-# The persistent inline keyboard attached to every built-in reply, so a chat
-# that only ever taps buttons never needs to type a command at all. /reboot
-# is deliberately left off it - tapping something dangerous by accident on a
-# phone screen is exactly what the danger is.
+# The persistent inline keyboard attached to every built-in reply/view, so a
+# chat that only ever taps buttons never needs to type a command at all.
+# "reboot" is a real control action, not a read-only view (see rhTgViewNames
+# below) - tapping it still goes through the normal /confirm flow, a button
+# can start that but never skip it.
 :global rhTgMenuMarkup do={
-  :return [:serialize to=json ({"inline_keyboard"={{{"text"="📊 Status"; "callback_data"="status"}; {"text"="📦 Modules"; "callback_data"="modules"}}; {{"text"="📜 Log"; "callback_data"="log"}; {"text"="❓ Help"; "callback_data"="help"}}}})]
+  :return [:serialize to=json ({"inline_keyboard"={
+    {{"text"="📊 Status"; "callback_data"="status"}; {"text"="📦 Modules"; "callback_data"="modules"}};
+    {{"text"="📜 Log"; "callback_data"="log"}; {"text"="❓ Help"; "callback_data"="help"}};
+    {{"text"="🔄 Check updates"; "callback_data"="check-updates"}; {"text"="♻️ Reboot"; "callback_data"="reboot"}}
+  }})]
 }
 
 # args: chatId, text, markup (optional JSON string, e.g. rhTgMenuMarkup)
 :global rhTgSend do={
   :global rhTgApi
   :global rhLog
-  :local payload ({"chat_id"=$chatId; "text"=$text})
+  :local payload ({"chat_id"=$chatId; "text"=$text; "parse_mode"="HTML"})
   :local markupVal $markup
   :if ([:typeof $markupVal] != "nothing" && $markupVal != "") do={
     :set ($payload->"reply_markup") [:deserialize from=json $markupVal]
@@ -80,6 +85,26 @@
     [$rhTgApi apiMethod="sendMessage" body=$body]
   } on-error={
     [$rhLog module="tg-control" level="warn" text=("could not send to chat " . $chatId)]
+  }
+}
+
+# args: chatId, messageId, text, markup (optional) - rewrites an existing
+# message in place (used for button taps) instead of sending a new one, so
+# tapping through Status/Modules/Log/Help/Menu updates one card rather than
+# spamming a fresh message per tap.
+:global rhTgEditMessage do={
+  :global rhTgApi
+  :global rhLog
+  :local payload ({"chat_id"=$chatId; "message_id"=$messageId; "text"=$text; "parse_mode"="HTML"})
+  :local markupVal $markup
+  :if ([:typeof $markupVal] != "nothing" && $markupVal != "") do={
+    :set ($payload->"reply_markup") [:deserialize from=json $markupVal]
+  }
+  :local body [:serialize to=json $payload]
+  :do {
+    [$rhTgApi apiMethod="editMessageText" body=$body]
+  } on-error={
+    [$rhLog module="tg-control" level="warn" text=("could not edit message in chat " . $chatId)]
   }
 }
 
@@ -107,36 +132,97 @@
   :global rhNow
   :global rhRouterName
   :local res [/system resource print as-value]
-  :return ("🖥 " . [$rhRouterName] . " @ " . [$rhNow] . "\ncpu: " . ($res->"cpu-load") . "%\nfree mem: " . ($res->"free-memory") . "\nuptime: " . ($res->"uptime"))
+  :return ("🖥 <b>" . [$rhRouterName] . "</b>\n" . [$rhNow] . "\n\ncpu: <code>" . ($res->"cpu-load") . "%</code>\nfree mem: <code>" . ($res->"free-memory") . "</code>\nuptime: <code>" . ($res->"uptime") . "</code>")
 }
 
 :global rhTgBuiltinModules do={
   :global rhPkgList
   :local mods [$rhPkgList]
-  :local out "modules:"
+  :local out "📦 <b>Installed modules</b>"
   :foreach name,rec in=$mods do={
-    :set out ($out . "\n" . $name . " " . ($rec->"version"))
+    :set out ($out . "\n• " . $name . " — <code>" . ($rec->"version") . "</code>")
   }
+  :if ([:len $mods] = 0) do={ :set out ($out . "\n<i>none installed</i>") }
   :return $out
 }
 
 :global rhTgBuiltinLog do={
   :global rhLogGet
   :local entries [$rhLogGet limit=10]
-  :local out "last log entries:"
+  :local out "📜 <b>Last log entries</b>"
   :foreach e in=$entries do={
-    :set out ($out . "\n[" . ($e->"level") . "] " . ($e->"module") . ": " . ($e->"text"))
+    :set out ($out . "\n<code>[" . ($e->"level") . "]</code> " . ($e->"module") . ": " . ($e->"text"))
   }
+  :if ([:len $entries] = 0) do={ :set out ($out . "\n<i>empty</i>") }
   :return $out
 }
 
 :global rhTgBuiltinHelp do={
   :global rhTgCommands
-  :local out "/status /modules /log /help /menu /reboot (needs /confirm)"
+  :local out "❓ <b>Commands</b>\n/status /modules /log /help /menu /reboot (needs /confirm)"
   :foreach name,script in=$rhTgCommands do={
     :set out ($out . " /" . $name)
   }
   :return $out
+}
+
+# Diffs installed module (and core) versions against manifest.json, as text
+# for the chat - a read-only view of exactly what rhPkgCheck would publish
+# events for, without needing to go dig through /log for those events.
+:global rhTgBuiltinCheckUpdates do={
+  :global rhPkgList
+  :global rhPkgManifest
+  :global rhVerCmp
+  :global rhCoreVersion
+  :local mods [$rhPkgList]
+  :local manifest [$rhPkgManifest]
+  :local availMods ($manifest->"modules")
+  :local out "🔄 <b>Update check</b>"
+  :local anyUpdate 0
+  :foreach name,rec in=$mods do={
+    :local avail ($availMods->$name)
+    :if ([:typeof $avail] != "nothing" && [$rhVerCmp ($avail->"version") ($rec->"version")] > 0) do={
+      :set out ($out . "\n⬆️ " . $name . ": <code>" . ($rec->"version") . "</code> → <code>" . ($avail->"version") . "</code>")
+      :set anyUpdate 1
+    }
+  }
+  :local coreAvail ($manifest->"core")
+  :if ([:typeof $coreAvail] != "nothing" && [$rhVerCmp ($coreAvail->"version") $rhCoreVersion] > 0) do={
+    :set out ($out . "\n⬆️ core: <code>v" . $rhCoreVersion . "</code> → <code>" . ($coreAvail->"version") . "</code>")
+    :set anyUpdate 1
+  }
+  :if ($anyUpdate = 0) do={ :set out ($out . "\n✅ everything up to date") }
+  :return $out
+}
+
+# Read-only views renderable both as a fresh message (typed command) and as
+# an in-place edit of the menu card (button tap) - kept in one place so the
+# two code paths can't drift apart on which names are "safe" to show without
+# running anything. args: view
+:global rhTgRenderView do={
+  :global rhTgBuiltinStatus
+  :global rhTgBuiltinModules
+  :global rhTgBuiltinLog
+  :global rhTgBuiltinHelp
+  :global rhTgBuiltinCheckUpdates
+  :if ($view = "status") do={ :return [$rhTgBuiltinStatus] }
+  :if ($view = "modules") do={ :return [$rhTgBuiltinModules] }
+  :if ($view = "log") do={ :return [$rhTgBuiltinLog] }
+  :if ($view = "help") do={ :return [$rhTgBuiltinHelp] }
+  :if ($view = "check-updates") do={ :return [$rhTgBuiltinCheckUpdates] }
+  :if ($view = "menu" || $view = "start") do={ :return "🤖 <b>ROSHub control menu</b>" }
+  :return ""
+}
+
+:global rhTgViewNames {"status"; "modules"; "log"; "help"; "check-updates"; "menu"; "start"}
+
+:global rhTgIsView do={
+  :global rhTgViewNames
+  :local found 0
+  :foreach v in=$rhTgViewNames do={
+    :if ($v = $view) do={ :set found 1 }
+  }
+  :return $found
 }
 
 # Commands that must be confirmed before running - matched against the
@@ -172,10 +258,8 @@
   :global rhTgIsDangerous
   :global rhTgRunConfirmed
   :global rhTgSend
-  :global rhTgBuiltinStatus
-  :global rhTgBuiltinModules
-  :global rhTgBuiltinLog
-  :global rhTgBuiltinHelp
+  :global rhTgRenderView
+  :global rhTgIsView
   :global rhTgMenuMarkup
 
   :if ([$rhTgIsWhitelisted chatId=$chatId] = 0) do={
@@ -220,45 +304,29 @@
       [$rhTgSend chatId=$chatId text="no matching pending confirmation"]
     }
   } else={
-    :if ($cmd = "status") do={
-      [$rhTgSend chatId=$chatId text=[$rhTgBuiltinStatus] markup=[$rhTgMenuMarkup]]
+    :if ([$rhTgIsView view=$cmd] = 1) do={
+      [$rhTgSend chatId=$chatId text=[$rhTgRenderView view=$cmd] markup=[$rhTgMenuMarkup]]
     } else={
-      :if ($cmd = "modules") do={
-        [$rhTgSend chatId=$chatId text=[$rhTgBuiltinModules] markup=[$rhTgMenuMarkup]]
+      :if ([$rhTgIsDangerous cmd=$cmd] = 1) do={
+        :local tok [:tostr (([/system clock get time] . [:tostr $chatId]))]
+        :local nowUptime [:tonum [/system resource get uptime]]
+        :local pending ($rhTgState->"pending")
+        :local entry [:toarray ""]
+        :set ($entry->"cmd") $cmd
+        :set ($entry->"token") $tok
+        :set ($entry->"expires") ($nowUptime + 60)
+        :set ($pending->[:tostr $chatId]) $entry
+        :set ($rhTgState->"pending") $pending
+        [$rhTgSend chatId=$chatId text=("type /confirm " . $tok . " within a minute to run /" . $cmd)]
       } else={
-        :if ($cmd = "log") do={
-          [$rhTgSend chatId=$chatId text=[$rhTgBuiltinLog] markup=[$rhTgMenuMarkup]]
-        } else={
-          :if ($cmd = "help") do={
-            [$rhTgSend chatId=$chatId text=[$rhTgBuiltinHelp] markup=[$rhTgMenuMarkup]]
-          } else={
-            :if ($cmd = "menu" || $cmd = "start") do={
-              [$rhTgSend chatId=$chatId text="ROSHub control menu:" markup=[$rhTgMenuMarkup]]
-            } else={
-            :if ([$rhTgIsDangerous cmd=$cmd] = 1) do={
-              :local tok [:tostr (([/system clock get time] . [:tostr $chatId]))]
-              :local nowUptime [:tonum [/system resource get uptime]]
-              :local pending ($rhTgState->"pending")
-              :local entry [:toarray ""]
-              :set ($entry->"cmd") $cmd
-              :set ($entry->"token") $tok
-              :set ($entry->"expires") ($nowUptime + 60)
-              :set ($pending->[:tostr $chatId]) $entry
-              :set ($rhTgState->"pending") $pending
-              [$rhTgSend chatId=$chatId text=("type /confirm " . $tok . " within a minute to run /" . $cmd)]
-            } else={
-              :if ([:typeof $script] != "nothing") do={
-                :do {
-                  /system script run $script
-                } on-error={
-                  [$rhTgSend chatId=$chatId text=("/" . $cmd . " failed")]
-                }
-              } else={
-                [$rhTgSend chatId=$chatId text=("unknown command: /" . $cmd)]
-              }
-            }
-            }
+        :if ([:typeof $script] != "nothing") do={
+          :do {
+            /system script run $script
+          } on-error={
+            [$rhTgSend chatId=$chatId text=("/" . $cmd . " failed")]
           }
+        } else={
+          [$rhTgSend chatId=$chatId text=("unknown command: /" . $cmd)]
         }
       }
     }
@@ -287,9 +355,13 @@
           :if ([:typeof $text] = "nothing") do={ :set text "" }
           [$rhTgHandleUpdate chatId=($chat->"id") fromId=($from->"id") text=$text]
         }
-        # A tapped inline-keyboard button - its "data" is the bare command
-        # name (no leading "/"), routed through the same handler as if it had
-        # been typed, then the button's spinner is cleared either way.
+        # A tapped inline-keyboard button. A read-only view (rhTgIsView) edits
+        # the existing menu card in place, so clicking through Status/
+        # Modules/Log/Help/Menu updates one message instead of spamming a new
+        # one per tap. Anything else (currently only "reboot") is a real
+        # control action - routed through the normal command handler exactly
+        # as if typed, so it still goes through the whitelist/dangerous/
+        # confirm machinery and sends its own separate message, not an edit.
         :local cbq ($upd->"callback_query")
         :if ([:typeof $cbq] != "nothing") do={
           :local cbMsg ($cbq->"message")
@@ -297,7 +369,11 @@
           :local cbFrom ($cbq->"from")
           :local cbData ($cbq->"data")
           :if ([:typeof $cbData] = "nothing") do={ :set cbData "" }
-          [$rhTgHandleUpdate chatId=($cbChat->"id") fromId=($cbFrom->"id") text=("/" . $cbData)]
+          :if ([$rhTgIsWhitelisted chatId=($cbChat->"id")] = 1 && [$rhTgIsView view=$cbData] = 1) do={
+            [$rhTgEditMessage chatId=($cbChat->"id") messageId=($cbMsg->"message_id") text=[$rhTgRenderView view=$cbData] markup=[$rhTgMenuMarkup]]
+          } else={
+            [$rhTgHandleUpdate chatId=($cbChat->"id") fromId=($cbFrom->"id") text=("/" . $cbData)]
+          }
           [$rhTgAnswerCallback id=($cbq->"id")]
         }
       }
