@@ -11,7 +11,7 @@
 :global rhConfigGet
 :global rhSecretGet
 
-:if ([:typeof $rhNotifyMsgText] = "nothing") do={
+:if ([:typeof $rhNotifyMsgText] = "nothing" || $rhNotifyMsgText = "") do={
   :error "rhNotifyMsgText not set (channel run outside the notify bus)"
 }
 
