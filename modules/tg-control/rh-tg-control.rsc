@@ -215,7 +215,7 @@
 :local offset ($rhTgState->"offset")
 :local url2 "ignore"
 :do {
-  :local url ("https://api.telegram.org/bot" . [$rhSecretGet key="tg.token" dflt=""] . "/getUpdates?offset=" . ($offset + 1) . "&timeout=0")
+  :local url ("https://api.telegram.org/bot" . [$rhSecretGet key="tg.token" dflt=""] . "/getUpdates?offset=" . $offset . "&timeout=0")
   :local r [/tool fetch url=$url as-value output=user]
   :if (($r->"status") = "finished") do={
     :local parsed [:deserialize from=json ($r->"data")]
