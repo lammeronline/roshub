@@ -13,12 +13,41 @@
 # it reads back "nothing"/the local's own value, not the original. Anywhere a default
 # is needed, the incoming value is first captured under a different local name.
 
-:global rhCoreVersion "0.1.5"
+:global rhCoreVersion "0.1.6"
 
 # ---- small helpers -----------------------------------------------------
 
 :global rhNow do={
   :return ([/system clock get date] . " " . [/system clock get time])
+}
+
+# Re-entrancy guard for a scheduled module script that can be slow (a network
+# call, a /ping with its own timeout) and so might still be running when its
+# own scheduler fires again - RouterOS does not serialize scheduled script
+# runs against each other. A stale lock (left behind by a run that crashed
+# before releasing it) expires after maxAgeSec so a module never gets stuck
+# locked out of itself.
+:global rhLocks [:toarray ""]
+
+# args: name, maxAgeSec (optional, default 120) - returns 1 if acquired, 0 if
+# already held by a still-fresh lock
+:global rhLockTry do={
+  :global rhLocks
+  :local maxAgeVal $maxAgeSec
+  :if ([:typeof $maxAgeVal] = "nothing") do={ :set maxAgeVal 120 }
+  :local now [:tonum [/system resource get uptime]]
+  :local held ($rhLocks->$name)
+  :if ([:typeof $held] != "nothing" && $held > 0 && ($now - $held) < $maxAgeVal) do={
+    :return 0
+  }
+  :set ($rhLocks->$name) $now
+  :return 1
+}
+
+# args: name
+:global rhLockRelease do={
+  :global rhLocks
+  :set ($rhLocks->$name) 0
 }
 
 # Splits a dotted version string ("7.25.1" or "v7.25.1") into an array of

@@ -19,6 +19,14 @@
 :global rhStateSave
 :global rhEventPublish
 :global rhNow
+:global rhLockTry
+:global rhLockRelease
+
+# Guards against this scheduler's own next tick overlapping a run still stuck
+# on /ping or the route-toggle retry loop - see rh-core's rhLockTry.
+:if ([$rhLockTry name="wg" maxAgeSec=30] = 0) do={
+  :error "previous run still in progress"
+}
 
 :global rhWgState
 
@@ -114,3 +122,4 @@
 }
 
 [$rhStateSave module="wg" data=$rhWgState]
+[$rhLockRelease name="wg"]

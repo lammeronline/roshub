@@ -20,6 +20,14 @@
 :global rhPkgList
 :global rhLogGet
 :global rhNow
+:global rhLockTry
+:global rhLockRelease
+
+# Guards against this scheduler's own next tick overlapping a run still stuck
+# on a slow getUpdates fetch - see rh-core's rhLockTry for why this matters.
+:if ([$rhLockTry name="tg-control" maxAgeSec=30] = 0) do={
+  :error "previous run still in progress"
+}
 
 :global rhTgState
 :global rhTgCommands
@@ -259,3 +267,4 @@
 }
 
 [$rhStateSave module="tg-control" data=$rhTgState]
+[$rhLockRelease name="tg-control"]
