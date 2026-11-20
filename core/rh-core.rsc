@@ -13,7 +13,7 @@
 # it reads back "nothing"/the local's own value, not the original. Anywhere a default
 # is needed, the incoming value is first captured under a different local name.
 
-:global rhCoreVersion "0.1.3"
+:global rhCoreVersion "0.1.4"
 
 # ---- small helpers -----------------------------------------------------
 
@@ -380,7 +380,11 @@
   [$rhStateSave module="core" data=$rhModules]
 
   :if ([:len $installed] > 0) do={
-    /system script run ($installed->0)
+    :do {
+      /system script run ($installed->0)
+    } on-error={
+      [$rhLog module="core" level="warn" text=($module . " installed but its first run failed (likely needs config/secrets)")]
+    }
   }
 
   [$rhEventPublish name="core.module.installed" level="info" module="core" text=($module . " " . ($mjson->"version") . " installed")]
