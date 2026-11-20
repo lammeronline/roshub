@@ -8,6 +8,7 @@
     "selftest": {"version": "v0.1.1", "tag": "v0.1.1"},
     "notify": {"version": "v0.1.0", "tag": "v0.2.0"},
     "notify-telegram": {"version": "v0.1.0", "tag": "v0.2.0"},
-    "notify-email": {"version": "v0.1.0", "tag": "v0.2.0"}
+    "notify-email": {"version": "v0.1.0", "tag": "v0.2.0"},
+    "wg": {"version": "v0.1.0", "tag": "v0.3.0"}
   }
 }
