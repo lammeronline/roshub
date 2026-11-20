@@ -1,8 +1,8 @@
 {
   "name": "tg-control",
-  "version": "v0.6.0",
+  "version": "v0.6.1",
   "min_core": "v0.1.11",
   "min_routeros": "v7.25",
   "files": ["rh-tg-control.rsc"],
-  "scheduler": {"interval": "10s", "start-time": "startup"}
+  "scheduler": {"interval": "3s", "start-time": "startup"}
 }
