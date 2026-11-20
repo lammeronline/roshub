@@ -1,33 +1,36 @@
 # RH:notify:rh-notify
 # Event bus. Subscribes itself to core events (re-subscribing on every run, since
 # rhEventSubs does not survive a reboot - see rh-core's rhEvent). Applies a global
-# min-level + enabled-channels filter, de-dupes repeated events (same module+name
-# sending the same level again is skipped until the level changes), and dispatches
-# to channel modules by script name: a channel is "rh-notify-<channel>", found and
-# run by that name - never called directly, so a missing/not-installed channel is
-# just a failed /system script run, caught and queued for retry.
+# min-level + enabled-channels filter and dispatches to channel modules by script
+# name: a channel is "rh-notify-<channel>", found and run by that name - never
+# called directly, so a missing/not-installed channel is just a failed
+# /system script run, caught and queued for retry.
+#
+# No dedup of its own here: every publisher (health's hysteresis, wg's up/down
+# transitions, traffic's once-per-month "notified" flag) already only calls
+# rhEventPublish on a genuine state change, so a second layer of "same
+# module+name+level as last time" dedup here would do the wrong thing - it
+# would permanently swallow a *repeat* occurrence of the same alert (e.g. a
+# second "wg down" after a recovery), since the key+level pair matches the
+# first time forever.
 #
 # Config (rhConfig): notify.channels = comma-separated list, e.g. "telegram,email"
 # (default: none). notify.min-level = debug|info|warn|crit (default: warn).
 
 :global rhLog
 :global rhConfigGet
-:global rhStateLoad
-:global rhStateSave
 :global rhEventSubscribe
 :global rhEvName
 :global rhEvLevel
 :global rhEvModule
 :global rhEvText
 
-:global rhNotifyLast
 :global rhNotifyQueue
 :global rhNotifyMsgText
 
 [$rhEventSubscribe script="rh-notify"]
 
 :if ([:typeof $rhNotifyQueue] = "nothing") do={ :set rhNotifyQueue [:toarray ""] }
-:if ([:typeof $rhNotifyLast] = "nothing") do={ :set rhNotifyLast [$rhStateLoad module="notify"] }
 
 # args: text, channel - runs "rh-notify-<channel>" with rhNotifyMsgText set and
 # returns 1/0. No side effect on the queue - callers decide what to do on failure
@@ -62,7 +65,6 @@
 }
 
 :global rhNotifyOnEvent do={
-  :global rhNotifyLast
   :local minLevel [$rhConfigGet key="notify.min-level" dflt="warn"]
   :local levelNum {"debug"=0; "info"=1; "warn"=2; "crit"=3}
   :local lvlN ($levelNum->$rhEvLevel)
@@ -70,12 +72,6 @@
   :if ([:typeof $lvlN] = "nothing") do={ :set lvlN 1 }
   :if ([:typeof $minN] = "nothing") do={ :set minN 2 }
   :if ($lvlN < $minN) do={ :return "" }
-
-  :local key ($rhEvModule . "." . $rhEvName)
-  :local prev ($rhNotifyLast->$key)
-  :if ($prev = $rhEvLevel) do={ :return "" }
-  :set ($rhNotifyLast->$key) $rhEvLevel
-  [$rhStateSave module="notify" data=$rhNotifyLast]
 
   :local line ("[" . $rhEvLevel . "] " . $rhEvModule . ": " . $rhEvText)
   [$rhNotifySend text=$line]
