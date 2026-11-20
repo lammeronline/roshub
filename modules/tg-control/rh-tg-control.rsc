@@ -212,10 +212,12 @@
   [$rhTgSend chatId=$chatId text=("unknown command: /" . $cmd)]
 }
 
-:local offset ($rhTgState->"offset")
-:local url2 "ignore"
+# offset is tracked directly on the (global) rhTgState map rather than a
+# plain :local, because ":set" to an outer :local from inside a ":do{}"
+# block does not propagate back out - it silently mutates a scoped copy,
+# which otherwise left this offset permanently stuck after the first poll.
 :do {
-  :local url ("https://api.telegram.org/bot" . [$rhSecretGet key="tg.token" dflt=""] . "/getUpdates?offset=" . $offset . "&timeout=0")
+  :local url ("https://api.telegram.org/bot" . [$rhSecretGet key="tg.token" dflt=""] . "/getUpdates?offset=" . ($rhTgState->"offset") . "&timeout=0")
   :local r [/tool fetch url=$url as-value output=user]
   :if (($r->"status") = "finished") do={
     :local parsed [:deserialize from=json ($r->"data")]
@@ -223,7 +225,7 @@
       :local results ($parsed->"result")
       :foreach upd in=$results do={
         :local updId ($upd->"update_id")
-        :if ($updId >= $offset) do={ :set offset ($updId + 1) }
+        :if ($updId >= ($rhTgState->"offset")) do={ :set ($rhTgState->"offset") ($updId + 1) }
         :local msg ($upd->"message")
         :if ([:typeof $msg] != "nothing") do={
           :local chat ($msg->"chat")
@@ -239,5 +241,4 @@
   [$rhLog module="tg-control" level="debug" text="getUpdates failed (no token yet?)"]
 }
 
-:set ($rhTgState->"offset") $offset
 [$rhStateSave module="tg-control" data=$rhTgState]
