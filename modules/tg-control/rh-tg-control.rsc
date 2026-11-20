@@ -458,7 +458,8 @@
         :set ($entry->"expires") ($nowUptime + 60)
         :set ($pending->[:tostr $chatId]) $entry
         :set ($rhTgState->"pending") $pending
-        [$rhTgSend chatId=$chatId text=("type /confirm " . $tok . " within a minute to run /" . $cmd)]
+        :local confirmMarkup [:serialize to=json ({"inline_keyboard"={{{"text"=("✅ Confirm /" . $cmd); "callback_data"=("confirm:" . $tok)}}}})]
+        [$rhTgSend chatId=$chatId text=("⚠️ type /confirm " . $tok . " within a minute to run /" . $cmd . ", or just tap below:") markup=$confirmMarkup]
       } else={
         :if ([:typeof $script] != "nothing") do={
           :do {
@@ -515,6 +516,7 @@
           :local cbData ($cbq->"data")
           :if ([:typeof $cbData] = "nothing") do={ :set cbData "" }
           :local navPrefix [:pick $cbData 0 4]
+          :local confirmPrefix [:pick $cbData 0 8]
           :if ([$rhTgIsWhitelisted chatId=($cbChat->"id")] = 0) do={
             [$rhLog module="tg-control" level="warn" text=("ignored button from non-whitelisted chat " . ($cbChat->"id"))]
           } else={
@@ -526,10 +528,15 @@
               :if ($section = "system") do={ :set title "⚙️ <b>System</b>" }
               [$rhTgEditMessage chatId=($cbChat->"id") messageId=($cbMsg->"message_id") text=$title markup=[$rhTgMenuMarkup section=$section]]
             } else={
+              :if ($confirmPrefix = "confirm:") do={
+                :local tok [:pick $cbData 8 [:len $cbData]]
+                [$rhTgHandleUpdate chatId=($cbChat->"id") fromId=($cbFrom->"id") text=("/confirm " . $tok)]
+              } else={
               :if ([$rhTgIsView view=$cbData] = 1) do={
                 [$rhTgEditMessage chatId=($cbChat->"id") messageId=($cbMsg->"message_id") text=[$rhTgRenderView view=$cbData] markup=[$rhTgMenuMarkup section=[$rhTgSectionOf name=$cbData]]]
               } else={
                 [$rhTgHandleUpdate chatId=($cbChat->"id") fromId=($cbFrom->"id") text=("/" . $cbData)]
+              }
               }
             }
           }
