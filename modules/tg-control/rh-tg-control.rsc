@@ -174,7 +174,8 @@
     :local pending ($rhTgState->"pending")
     :local chatKey [:tostr $chatId]
     :local entry ($pending->$chatKey)
-    :if ([:typeof $entry] != "nothing" && ($entry->"token") = $arg) do={
+    :local nowUptime [:tonum [/system resource get uptime]]
+    :if ([:typeof $entry] != "nothing" && ($entry->"token") = $arg && $nowUptime <= ($entry->"expires")) do={
       :local dcmd ($entry->"cmd")
       :local newPending [:toarray ""]
       :foreach k,v in=$pending do={
@@ -201,10 +202,12 @@
           } else={
             :if ([$rhTgIsDangerous cmd=$cmd] = 1) do={
               :local tok [:tostr (([/system clock get time] . [:tostr $chatId]))]
+              :local nowUptime [:tonum [/system resource get uptime]]
               :local pending ($rhTgState->"pending")
               :local entry [:toarray ""]
               :set ($entry->"cmd") $cmd
               :set ($entry->"token") $tok
+              :set ($entry->"expires") ($nowUptime + 60)
               :set ($pending->[:tostr $chatId]) $entry
               :set ($rhTgState->"pending") $pending
               [$rhTgSend chatId=$chatId text=("type /confirm " . $tok . " within a minute to run /" . $cmd)]

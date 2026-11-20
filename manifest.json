@@ -12,7 +12,7 @@
     "wg": {"version": "v0.1.0", "tag": "v0.3.0"},
     "health": {"version": "v0.1.0", "tag": "v0.4.0"},
     "traffic": {"version": "v0.1.0", "tag": "v0.5.0"},
-    "tg-control": {"version": "v0.1.4", "tag": "v0.13.0"},
+    "tg-control": {"version": "v0.1.5", "tag": "v0.16.0"},
     "notify-ntfy": {"version": "v0.1.2", "tag": "v0.14.0"},
     "notify-webhook": {"version": "v0.1.2", "tag": "v0.14.0"}
   }
