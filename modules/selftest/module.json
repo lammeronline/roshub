@@ -1,8 +1,8 @@
 {
   "name": "selftest",
-  "version": "0.1.0",
-  "min_core": "0.1.0",
-  "min_routeros": "7.25",
+  "version": "v0.1.1",
+  "min_core": "v0.1.0",
+  "min_routeros": "v7.25",
   "files": ["rh-selftest.rsc"],
   "scheduler": {"interval": "0", "start-time": "startup"}
 }

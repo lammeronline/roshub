@@ -13,7 +13,7 @@
 # it reads back "nothing"/the local's own value, not the original. Anywhere a default
 # is needed, the incoming value is first captured under a different local name.
 
-:global rhCoreVersion "0.1.0"
+:global rhCoreVersion "0.1.1"
 
 # ---- small helpers -----------------------------------------------------
 
@@ -21,9 +21,16 @@
   :return ([/system clock get date] . " " . [/system clock get time])
 }
 
-# Splits a dotted version string ("7.25.1") into an array of numbers.
+# Splits a dotted version string ("7.25.1" or "v7.25.1") into an array of
+# numbers. The "v" prefix is accepted (and expected from JSON: RouterOS's
+# JSON parser silently mangles a bare dotted-number string into an IP-address
+# value, e.g. "0.1.0" -> "0.1.0.0", so every version in manifest.json/
+# module.json is written as "v0.1.0" to avoid that).
 :global rhVerParts do={
   :local s $1
+  :if ([:len $s] > 0 && ([:pick $s 0 1] = "v" || [:pick $s 0 1] = "V")) do={
+    :set s [:pick $s 1 [:len $s]]
+  }
   :local parts [:toarray ""]
   :local cur ""
   :local i 0
