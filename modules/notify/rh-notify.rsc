@@ -40,6 +40,7 @@
   :do {
     /system script run $scriptName
   } on-error={ :set ok 0 }
+  :unset rhNotifyMsgText
   :return $ok
 }
 
