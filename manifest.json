@@ -3,7 +3,7 @@
   "repo": "lammeronline/roshub",
   "channel": "stable",
   "min_routeros": "7.25",
-  "core": {"version": "v0.1.8", "tag": "v0.19.0"},
+  "core": {"version": "v0.1.9", "tag": "v0.20.0"},
   "modules": {
     "selftest": {"version": "v0.1.1", "tag": "v0.1.1"},
     "notify": {"version": "v0.1.4", "tag": "v0.19.0"},

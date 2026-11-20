@@ -13,7 +13,7 @@
 # it reads back "nothing"/the local's own value, not the original. Anywhere a default
 # is needed, the incoming value is first captured under a different local name.
 
-:global rhCoreVersion "0.1.8"
+:global rhCoreVersion "0.1.9"
 
 # ---- small helpers -----------------------------------------------------
 
@@ -104,10 +104,12 @@
 # ---- rhLog --------------------------------------------------------------
 # Levels: debug, info, warn, crit. Writes to /log (RouterOS has no "critical"
 # add-command, so crit is logged as error) and keeps a small in-memory ring
-# buffer for tools like tg-control's future "/log" command. Not persisted to
-# disk - it does not need to survive a reboot.
-
-:global rhLogBuf [:toarray ""]
+# buffer for tools like tg-control's "/log" command. Not persisted to disk -
+# it does not need to survive a reboot, but it also should not survive a
+# same-uptime core re-run (rhPkgUpdate/rhPkgInstall of core itself) any less
+# than rhEventSubs/rhLocks/rhEvSeq do, for the same reason.
+:global rhLogBuf
+:if ([:typeof $rhLogBuf] = "nothing") do={ :set rhLogBuf [:toarray ""] }
 :global rhLogBufMax 200
 
 # args: module, level (debug|info|warn|crit), text, data (optional)
