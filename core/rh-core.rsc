@@ -13,7 +13,7 @@
 # it reads back "nothing"/the local's own value, not the original. Anywhere a default
 # is needed, the incoming value is first captured under a different local name.
 
-:global rhCoreVersion "0.1.7"
+:global rhCoreVersion "0.1.8"
 
 # ---- small helpers -----------------------------------------------------
 
@@ -282,6 +282,16 @@
 :global rhEvModule ""
 :global rhEvText ""
 :global rhEvData ""
+# Bumped by every rhEventPublish, never reset on a core re-run (same reasoning
+# as rhEventSubs above). A subscriber script's body runs unconditionally
+# whenever it is run at all - by rhEventPublish's own dispatch, by its own
+# periodic scheduler, or by a manual re-run - so without a sequence number to
+# compare against, it has no way to tell "a fresh event just happened" from
+# "I'm just being re-run with whatever rhEv* happened to be set last time" -
+# which, right after a core reload, is "" for everything, and was confirmed on
+# the CHR stand to reach Telegram as a blank "[] : " message.
+:global rhEvSeq
+:if ([:typeof $rhEvSeq] = "nothing") do={ :set rhEvSeq 0 }
 
 # args: script
 :global rhEventSubscribe do={
@@ -308,11 +318,13 @@
 
   [$rhLog module=$module level=$level text=$text data=$dataVal]
 
+  :global rhEvSeq
   :set rhEvName $name
   :set rhEvLevel $level
   :set rhEvModule $module
   :set rhEvText $text
   :set rhEvData $dataVal
+  :set rhEvSeq ($rhEvSeq + 1)
 
   :foreach h in=$rhEventSubs do={
     :do {

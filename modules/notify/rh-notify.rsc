@@ -24,13 +24,23 @@
 :global rhEvLevel
 :global rhEvModule
 :global rhEvText
+:global rhEvSeq
 
 :global rhNotifyQueue
 :global rhNotifyMsgText
+:global rhNotifyLastSeq
 
 [$rhEventSubscribe script="rh-notify"]
 
 :if ([:typeof $rhNotifyQueue] = "nothing") do={ :set rhNotifyQueue [:toarray ""] }
+# Tracks the last rhEvSeq actually processed, so this script's own periodic
+# scheduler tick (or a manual re-run, e.g. to re-subscribe after a core
+# update) doesn't re-process whatever rhEv* happened to be set last time -
+# confirmed on the CHR stand to otherwise resend the last real event, or
+# (right after a core reload, when rhEv* are freshly "") a blank "[] : ".
+# Initializing to the CURRENT rhEvSeq (not 0) means a fresh boot with no
+# event published yet correctly processes nothing.
+:if ([:typeof $rhNotifyLastSeq] = "nothing") do={ :set rhNotifyLastSeq $rhEvSeq }
 
 # args: text, channel - runs "rh-notify-<channel>" with rhNotifyMsgText set and
 # returns 1/0. No side effect on the queue - callers decide what to do on failure
@@ -65,6 +75,10 @@
 }
 
 :global rhNotifyOnEvent do={
+  :global rhNotifyLastSeq
+  :if ($rhEvSeq = $rhNotifyLastSeq) do={ :return "" }
+  :set rhNotifyLastSeq $rhEvSeq
+
   :local minLevel [$rhConfigGet key="notify.min-level" dflt="warn"]
   :local levelNum {"debug"=0; "info"=1; "warn"=2; "crit"=3}
   :local lvlN ($levelNum->$rhEvLevel)
