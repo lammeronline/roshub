@@ -13,7 +13,7 @@
 # it reads back "nothing"/the local's own value, not the original. Anywhere a default
 # is needed, the incoming value is first captured under a different local name.
 
-:global rhCoreVersion "0.1.6"
+:global rhCoreVersion "0.1.7"
 
 # ---- small helpers -----------------------------------------------------
 
@@ -27,7 +27,8 @@
 # runs against each other. A stale lock (left behind by a run that crashed
 # before releasing it) expires after maxAgeSec so a module never gets stuck
 # locked out of itself.
-:global rhLocks [:toarray ""]
+:global rhLocks
+:if ([:typeof $rhLocks] = "nothing") do={ :set rhLocks [:toarray ""] }
 
 # args: name, maxAgeSec (optional, default 120) - returns 1 if acquired, 0 if
 # already held by a still-fresh lock
@@ -271,7 +272,11 @@
 # a subscriber (e.g. the notify module) is responsible for its own routing
 # rules and de-duplication.
 
-:global rhEventSubs [:toarray ""]
+#   Not reset on a core re-run (e.g. rhPkgUpdate/rhPkgInstall of core itself) -
+#   only cleared on an actual reboot - otherwise every subscriber would go
+#   deaf until its own scheduler happened to re-subscribe it.
+:global rhEventSubs
+:if ([:typeof $rhEventSubs] = "nothing") do={ :set rhEventSubs [:toarray ""] }
 :global rhEvName ""
 :global rhEvLevel ""
 :global rhEvModule ""
