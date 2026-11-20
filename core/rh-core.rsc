@@ -83,6 +83,12 @@
 # args: module, level (debug|info|warn|crit), text, data (optional)
 :global rhLog do={
   :global rhLogBuf
+  :local moduleVal $module
+  :local levelVal $level
+  :local textVal $text
+  :if ([:typeof $moduleVal] = "nothing" || [:typeof $levelVal] = "nothing" || [:typeof $textVal] = "nothing") do={
+    :return ""
+  }
   :local dataVal $data
   :if ([:typeof $dataVal] = "nothing") do={ :set dataVal "" }
 
