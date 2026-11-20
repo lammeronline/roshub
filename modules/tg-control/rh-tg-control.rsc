@@ -124,8 +124,10 @@
 # args: chatId, cmd - runs a confirmed dangerous command by name
 :global rhTgRunConfirmed do={
   :global rhLog
+  :global rhTgSend
   :if ($cmd = "reboot") do={
     [$rhLog module="tg-control" level="crit" text=("reboot confirmed via chat " . $chatId)]
+    [$rhTgSend chatId=$chatId text="rebooting now"]
     /system reboot
   }
 }
