@@ -8,7 +8,10 @@
 - **Health** — мониторинг роутера с порогами и гистерезисом.
 - **WireGuard и трафик** — контроль туннелей, переключение на прямой канал, история падений, учёт трафика.
 
-> Статус: проектирование. План — [docs/PLAN.md](docs/PLAN.md).
+> Статус: ядро и все основные модули реализованы и проверены на тестовом стенде (CHR), этапы 0-8 из
+> [docs/PLAN.md](docs/PLAN.md) пройдены. WhatsApp и Viber не реализованы — требуют сторонний шлюз/аккаунт.
+> Установка: `/tool fetch url="https://raw.githubusercontent.com/lammeronline/roshub/main/bootstrap.rsc" dst-path=bootstrap.rsc; /import bootstrap.rsc`,
+> дальше модули через `rhPkgInstall`.
 
 Требования: RouterOS 7.25+.
 

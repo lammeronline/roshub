@@ -1,0 +1,7 @@
+{
+  "name": "notify-webhook",
+  "version": "v0.1.0",
+  "min_core": "v0.1.0",
+  "min_routeros": "v7.25",
+  "files": ["rh-notify-webhook.rsc"]
+}
