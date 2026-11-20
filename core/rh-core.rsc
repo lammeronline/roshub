@@ -13,7 +13,7 @@
 # it reads back "nothing"/the local's own value, not the original. Anywhere a default
 # is needed, the incoming value is first captured under a different local name.
 
-:global rhCoreVersion "0.1.4"
+:global rhCoreVersion "0.1.5"
 
 # ---- small helpers -----------------------------------------------------
 
@@ -414,6 +414,78 @@
 
 :global rhPkgList do={
   :return $rhModules
+}
+
+# Compares installed versions (core + every installed module) against
+# manifest.json on main, and publishes core.update.available once per call
+# for anything newer - no state of its own, so it is safe to call as often
+# or as rarely as wanted (manually, from tg-control, or from a scheduler).
+:global rhPkgCheck do={
+  :global rhModules
+  :global rhCoreVersion
+  :local manifest [$rhPkgManifest]
+  :local mods ($manifest->"modules")
+  :foreach name,rec in=$rhModules do={
+    :local avail ($mods->$name)
+    :if ([:typeof $avail] != "nothing") do={
+      :if ([$rhVerCmp ($avail->"version") ($rec->"version")] > 0) do={
+        [$rhEventPublish name="core.update.available" level="info" module="core" text=($name . ": " . ($rec->"version") . " -> " . ($avail->"version"))]
+      }
+    }
+  }
+  :local coreAvail ($manifest->"core")
+  :if ([:typeof $coreAvail] != "nothing") do={
+    :if ([$rhVerCmp ($coreAvail->"version") $rhCoreVersion] > 0) do={
+      [$rhEventPublish name="core.update.available" level="info" module="core" text=("core: " . $rhCoreVersion . " -> " . ($coreAvail->"version"))]
+    }
+  }
+}
+
+# Backs up every installed file of a module to "<file>.bak" (a second
+# /system script object, not a file - no extra /file writes), then installs
+# it again, which naturally pulls whatever tag manifest.json points at now.
+# args: module
+:global rhPkgUpdate do={
+  :global rhModules
+  :local rec ($rhModules->$module)
+  :if ([:typeof $rec] = "nothing") do={
+    [$rhLog module="core" level="warn" text=("module not installed: " . $module)]
+    :error ("module not installed: " . $module)
+  }
+  :foreach f in=($rec->"files") do={
+    :if ([:len [/system script find name=$f]] > 0) do={
+      :local src [/system script get [find name=$f] source]
+      :local bakName ($f . ".bak")
+      :if ([:len [/system script find name=$bakName]] > 0) do={
+        /system script set [find name=$bakName] source=$src
+      } else={
+        /system script add name=$bakName source=$src comment=("RH:" . $module . ":backup")
+      }
+    }
+  }
+  [$rhPkgInstall module=$module]
+}
+
+# Restores every installed file of a module from its "<file>.bak" backup
+# (made by the last rhPkgUpdate) without re-fetching anything from GitHub.
+# args: module
+:global rhPkgRollback do={
+  :global rhModules
+  :local rec ($rhModules->$module)
+  :if ([:typeof $rec] = "nothing") do={
+    [$rhLog module="core" level="warn" text=("module not installed: " . $module)]
+    :error ("module not installed: " . $module)
+  }
+  :foreach f in=($rec->"files") do={
+    :local bakName ($f . ".bak")
+    :if ([:len [/system script find name=$bakName]] > 0) do={
+      :local src [/system script get [find name=$bakName] source]
+      /system script set [find name=$f] source=$src
+    } else={
+      [$rhLog module="core" level="warn" text=("no backup for " . $f . ", skipped")]
+    }
+  }
+  [$rhLog module="core" level="warn" text=($module . " rolled back")]
 }
 
 # ---- startup ---------------------------------------------------------------
