@@ -16,9 +16,12 @@
 :global rhLog
 :global rhConfigGet
 :global rhStateLoad
-:global rhStateSave
+:global rhStateSaveThrottled
 :global rhEventPublish
 :global rhNow
+
+:global rhHealthChanged
+:set rhHealthChanged 0
 
 :global rhHealthState
 
@@ -72,6 +75,8 @@
       :if ($level = "warn") do={ :set evLevel "warn" }
       :if ($level = "crit") do={ :set evLevel "crit" }
       [$rhEventPublish name=("health." . $name) level=$evLevel module="health" text=($name . ": " . $curLevel . " -> " . $level . " (" . $text . ")")]
+      :global rhHealthChanged
+      :set rhHealthChanged 1
     }
   }
 
@@ -143,7 +148,10 @@
   :set ($rhHealthState->"reboot-count") (($rhHealthState->"reboot-count") + 1)
   [$rhLog module="health" level="warn" text=("unexpected reboot detected, uptime reset to " . $curUptime . "s")]
   [$rhEventPublish name="health.reboot" level="warn" module="health" text="router rebooted"]
+  :set rhHealthChanged 1
 }
 :set ($rhHealthState->"last-uptime") $curUptime
 
-[$rhStateSave module="health" data=$rhHealthState]
+# A confirmed level change or reboot is force-saved immediately; routine
+# per-minute hysteresis-counter drift is fine to lose up to minIntervalSec.
+[$rhStateSaveThrottled module="health" data=$rhHealthState minIntervalSec=300 force=$rhHealthChanged]

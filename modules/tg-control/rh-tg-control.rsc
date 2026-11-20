@@ -16,7 +16,7 @@
 :global rhConfigGet
 :global rhSecretGet
 :global rhStateLoad
-:global rhStateSave
+:global rhStateSaveThrottled
 :global rhPkgList
 :global rhLogGet
 :global rhNow
@@ -266,5 +266,5 @@
   [$rhLog module="tg-control" level="debug" text="getUpdates failed (no token yet?)"]
 }
 
-[$rhStateSave module="tg-control" data=$rhTgState]
+[$rhStateSaveThrottled module="tg-control" data=$rhTgState minIntervalSec=60]
 [$rhLockRelease name="tg-control"]

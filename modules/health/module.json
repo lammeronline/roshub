@@ -1,7 +1,7 @@
 {
   "name": "health",
-  "version": "v0.1.0",
-  "min_core": "v0.1.0",
+  "version": "v0.1.1",
+  "min_core": "v0.1.10",
   "min_routeros": "v7.25",
   "files": ["rh-health.rsc"],
   "scheduler": {"interval": "1m", "start-time": "startup"}

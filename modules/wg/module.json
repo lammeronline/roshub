@@ -1,7 +1,7 @@
 {
   "name": "wg",
-  "version": "v0.1.1",
-  "min_core": "v0.1.6",
+  "version": "v0.1.2",
+  "min_core": "v0.1.10",
   "min_routeros": "v7.25",
   "files": ["rh-wg.rsc", "rh-wg-apply.rsc"],
   "scheduler": {"interval": "30s", "start-time": "startup"}

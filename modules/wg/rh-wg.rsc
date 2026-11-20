@@ -16,7 +16,7 @@
 :global rhLog
 :global rhConfigGet
 :global rhStateLoad
-:global rhStateSave
+:global rhStateSaveThrottled
 :global rhEventPublish
 :global rhNow
 :global rhLockTry
@@ -101,6 +101,7 @@
     }
     [$rhLog module="wg" level="warn" text="tunnel recovered, routes enabled"]
     [$rhEventPublish name="wg.up" level="warn" module="wg" text="tunnel recovered"]
+    [$rhStateSaveThrottled module="wg" data=$rhWgState force=1]
   }
 } else={
   :set ($rhWgState->"oks") 0
@@ -118,8 +119,11 @@
     :set ($rhWgState->"history") $h
     [$rhLog module="wg" level="crit" text="tunnel down, routes disabled"]
     [$rhEventPublish name="wg.down" level="crit" module="wg" text="tunnel down"]
+    [$rhStateSaveThrottled module="wg" data=$rhWgState force=1]
   }
 }
 
-[$rhStateSave module="wg" data=$rhWgState]
+# Up to 120s of fails/oks counter drift can be lost on a crash - acceptable,
+# since a real status change is always force-saved immediately above.
+[$rhStateSaveThrottled module="wg" data=$rhWgState minIntervalSec=120]
 [$rhLockRelease name="wg"]

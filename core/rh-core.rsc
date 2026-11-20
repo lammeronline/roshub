@@ -13,7 +13,7 @@
 # it reads back "nothing"/the local's own value, not the original. Anywhere a default
 # is needed, the incoming value is first captured under a different local name.
 
-:global rhCoreVersion "0.1.9"
+:global rhCoreVersion "0.1.10"
 
 # ---- small helpers -----------------------------------------------------
 
@@ -264,6 +264,34 @@
   } else={
     /file add name=$fname contents=$json
   }
+}
+
+# A module with a fast scheduler (tg-control every 10s, wg every 30s) calling
+# rhStateSave unconditionally on every tick writes to flash far more often
+# than the data actually needs to survive a crash for - thousands of writes a
+# day, which matters for flash wear on a router left running for years.
+# Writes at most once per minIntervalSec per module, tracked in memory (not
+# persisted, not reset on a core re-run - same reasoning as rhEventSubs).
+# args: module, data, minIntervalSec (optional, default 60), force (optional,
+# 1 to bypass the throttle - e.g. a module's own state transition worth
+# persisting immediately rather than losing up to minIntervalSec of it)
+:global rhStateSaveLast
+:if ([:typeof $rhStateSaveLast] = "nothing") do={ :set rhStateSaveLast [:toarray ""] }
+
+:global rhStateSaveThrottled do={
+  :global rhStateSaveLast
+  :global rhStateSave
+  :local minInterval $minIntervalSec
+  :if ([:typeof $minInterval] = "nothing") do={ :set minInterval 60 }
+  :local forceVal $force
+  :if ([:typeof $forceVal] = "nothing") do={ :set forceVal 0 }
+  :local now [:tonum [/system resource get uptime]]
+  :local last ($rhStateSaveLast->$module)
+  :if ($forceVal = 0 && [:typeof $last] != "nothing" && ($now - $last) < $minInterval) do={
+    :return ""
+  }
+  [$rhStateSave module=$module data=$data]
+  :set ($rhStateSaveLast->$module) $now
 }
 
 # ---- rhEvent ---------------------------------------------------------------
