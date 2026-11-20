@@ -58,18 +58,49 @@
   :return ($parsed->"result")
 }
 
-# The persistent inline keyboard attached to every built-in reply/view, so a
-# chat that only ever taps buttons never needs to type a command at all.
-# "reboot" is a real control action, not a read-only view (see rhTgViewNames
-# below) - tapping it still goes through the normal /confirm flow, a button
-# can start that but never skip it.
+# Multi-level menu: "nav:<name>" is pure navigation (never runs anything,
+# always handled by editing the card in place with that section's keyboard),
+# everything else is either a read-only view (rhTgViewNames, also
+# edit-in-place) or a real control action routed through the normal command
+# handler - so a button can start the /confirm flow for something dangerous,
+# but never skip it. args: section (optional, default "main")
 :global rhTgMenuMarkup do={
+  :local sectionVal $section
+  :if ([:typeof $sectionVal] = "nothing") do={ :set sectionVal "main" }
+  :if ($sectionVal = "info") do={
+    :return [:serialize to=json ({"inline_keyboard"={
+      {{"text"="📊 Status"; "callback_data"="status"}; {"text"="📦 Modules"; "callback_data"="modules"}};
+      {{"text"="📜 Log"; "callback_data"="log"}; {"text"="❓ Help"; "callback_data"="help"}};
+      {{"text"="⬅️ Back"; "callback_data"="nav:main"}}
+    }})]
+  }
+  :if ($sectionVal = "tools") do={
+    :return [:serialize to=json ({"inline_keyboard"={
+      {{"text"="🔄 Check updates"; "callback_data"="check-updates"}; {"text"="⬆️ Apply updates"; "callback_data"="apply-updates"}};
+      {{"text"="⬅️ Back"; "callback_data"="nav:main"}}
+    }})]
+  }
+  :if ($sectionVal = "system") do={
+    :return [:serialize to=json ({"inline_keyboard"={
+      {{"text"="🔍 Check RouterOS update"; "callback_data"="sys-check"}};
+      {{"text"="⬇️ Install RouterOS update"; "callback_data"="sys-update"}};
+      {{"text"="🔧 Upgrade RouterBOARD firmware"; "callback_data"="fw-upgrade"}};
+      {{"text"="♻️ Reboot"; "callback_data"="reboot"}};
+      {{"text"="⬅️ Back"; "callback_data"="nav:main"}}
+    }})]
+  }
   :return [:serialize to=json ({"inline_keyboard"={
-    {{"text"="📊 Status"; "callback_data"="status"}; {"text"="📦 Modules"; "callback_data"="modules"}};
-    {{"text"="📜 Log"; "callback_data"="log"}; {"text"="❓ Help"; "callback_data"="help"}};
-    {{"text"="🔄 Check updates"; "callback_data"="check-updates"}; {"text"="⬆️ Apply updates"; "callback_data"="apply-updates"}};
-    {{"text"="♻️ Reboot"; "callback_data"="reboot"}}
+    {{"text"="ℹ️ Info"; "callback_data"="nav:info"}; {"text"="🧰 Tools"; "callback_data"="nav:tools"}; {"text"="⚙️ System"; "callback_data"="nav:system"}}
   }})]
+}
+
+# Which section's keyboard to attach under a view/action's own reply, so
+# "Back" lands where it was tapped from rather than always the top level.
+:global rhTgSectionOf do={
+  :if ($name = "status" || $name = "modules" || $name = "log" || $name = "help") do={ :return "info" }
+  :if ($name = "check-updates" || $name = "apply-updates") do={ :return "tools" }
+  :if ($name = "sys-check" || $name = "sys-update" || $name = "fw-upgrade" || $name = "reboot") do={ :return "system" }
+  :return "main"
 }
 
 # args: chatId, text, markup (optional JSON string, e.g. rhTgMenuMarkup)
@@ -160,7 +191,7 @@
 
 :global rhTgBuiltinHelp do={
   :global rhTgCommands
-  :local out "❓ <b>Commands</b>\n/status /modules /log /help /menu /check-updates /apply-updates /reboot (needs /confirm)"
+  :local out "❓ <b>Commands</b>\n/status /modules /log /help /menu /check-updates /apply-updates /sys-check /sys-update /fw-upgrade /reboot (needs /confirm)"
   :foreach name,script in=$rhTgCommands do={
     :set out ($out . " /" . $name)
   }
@@ -232,6 +263,44 @@
   :return $out
 }
 
+# Read-only: asks RouterOS to check its update channel, waits a few seconds
+# for that check to come back, then reports what it found. Does NOT download
+# or install anything - see rhTgRunConfirmed's "sys-update" for that.
+:global rhTgBuiltinSysCheck do={
+  :local out "🔍 <b>RouterOS update check</b>"
+  :do {
+    /system package update check-for-updates
+    :delay 3s
+    :local upd [/system package update print as-value]
+    :set out ($out . "\nchannel: <code>" . ($upd->"channel") . "</code>\ninstalled: <code>" . ($upd->"installed-version") . "</code>\nlatest: <code>" . ($upd->"latest-version") . "</code>\nstatus: <code>" . ($upd->"status") . "</code>")
+  } on-error={
+    :set out ($out . "\n❌ could not reach the update channel")
+  }
+  :return $out
+}
+
+# args: chatId - runs the actual RouterOS package install (downloads +
+# installs + reboots on its own once ready, per RouterOS's own behaviour -
+# not something this module controls or can prevent).
+:global rhTgRunSysUpdate do={
+  :global rhTgSend
+  [$rhTgSend chatId=$chatId text="⬇️ Installing RouterOS update - the router will reboot on its own once it's done."]
+  /system package update install
+}
+
+# args: chatId - upgrades RouterBOARD firmware to match the installed
+# RouterOS. Unlike a package install this does NOT reboot on its own - the
+# new firmware only takes effect after a manual reboot.
+:global rhTgRunFwUpgrade do={
+  :global rhTgSend
+  :do {
+    /system routerboard upgrade
+    [$rhTgSend chatId=$chatId text="🔧 RouterBOARD firmware upgraded - run /reboot for it to take effect."]
+  } on-error={
+    [$rhTgSend chatId=$chatId text="❌ RouterBOARD upgrade failed or nothing to upgrade."]
+  }
+}
+
 # Read-only views renderable both as a fresh message (typed command) and as
 # an in-place edit of the menu card (button tap) - kept in one place so the
 # two code paths can't drift apart on which names are "safe" to show without
@@ -242,16 +311,18 @@
   :global rhTgBuiltinLog
   :global rhTgBuiltinHelp
   :global rhTgBuiltinCheckUpdates
+  :global rhTgBuiltinSysCheck
   :if ($view = "status") do={ :return [$rhTgBuiltinStatus] }
   :if ($view = "modules") do={ :return [$rhTgBuiltinModules] }
   :if ($view = "log") do={ :return [$rhTgBuiltinLog] }
   :if ($view = "help") do={ :return [$rhTgBuiltinHelp] }
   :if ($view = "check-updates") do={ :return [$rhTgBuiltinCheckUpdates] }
+  :if ($view = "sys-check") do={ :return [$rhTgBuiltinSysCheck] }
   :if ($view = "menu" || $view = "start") do={ :return "🤖 <b>ROSHub control menu</b>" }
   :return ""
 }
 
-:global rhTgViewNames {"status"; "modules"; "log"; "help"; "check-updates"; "menu"; "start"}
+:global rhTgViewNames {"status"; "modules"; "log"; "help"; "check-updates"; "sys-check"; "menu"; "start"}
 
 :global rhTgIsView do={
   :global rhTgViewNames
@@ -263,8 +334,10 @@
 }
 
 # Commands that must be confirmed before running - matched against the
-# command name (without the leading "/").
-:global rhTgDangerous {"reboot"}
+# command name (without the leading "/"). sys-update and fw-upgrade are here
+# alongside reboot because both can leave the router rebooting or otherwise
+# unreachable on their own schedule, not just this module's.
+:global rhTgDangerous {"reboot"; "sys-update"; "fw-upgrade"}
 
 :global rhTgIsDangerous do={
   :global rhTgDangerous
@@ -279,10 +352,20 @@
 :global rhTgRunConfirmed do={
   :global rhLog
   :global rhTgSend
+  :global rhTgRunSysUpdate
+  :global rhTgRunFwUpgrade
   :if ($cmd = "reboot") do={
     [$rhLog module="tg-control" level="crit" text=("reboot confirmed via chat " . $chatId)]
     [$rhTgSend chatId=$chatId text="rebooting now"]
     /system reboot
+  }
+  :if ($cmd = "sys-update") do={
+    [$rhLog module="tg-control" level="crit" text=("RouterOS update confirmed via chat " . $chatId)]
+    [$rhTgRunSysUpdate chatId=$chatId]
+  }
+  :if ($cmd = "fw-upgrade") do={
+    [$rhLog module="tg-control" level="crit" text=("RouterBOARD upgrade confirmed via chat " . $chatId)]
+    [$rhTgRunFwUpgrade chatId=$chatId]
   }
 }
 
@@ -297,6 +380,7 @@
   :global rhTgSend
   :global rhTgRenderView
   :global rhTgIsView
+  :global rhTgSectionOf
   :global rhTgBuiltinApplyUpdates
   :global rhTgMenuMarkup
 
@@ -343,10 +427,10 @@
     }
   } else={
     :if ([$rhTgIsView view=$cmd] = 1) do={
-      [$rhTgSend chatId=$chatId text=[$rhTgRenderView view=$cmd] markup=[$rhTgMenuMarkup]]
+      [$rhTgSend chatId=$chatId text=[$rhTgRenderView view=$cmd] markup=[$rhTgMenuMarkup section=[$rhTgSectionOf name=$cmd]]]
     } else={
     :if ($cmd = "apply-updates") do={
-      [$rhTgSend chatId=$chatId text=[$rhTgBuiltinApplyUpdates] markup=[$rhTgMenuMarkup]]
+      [$rhTgSend chatId=$chatId text=[$rhTgBuiltinApplyUpdates] markup=[$rhTgMenuMarkup section=[$rhTgSectionOf name=$cmd]]]
     } else={
       :if ([$rhTgIsDangerous cmd=$cmd] = 1) do={
         :local tok [:tostr (([/system clock get time] . [:tostr $chatId]))]
@@ -397,13 +481,16 @@
           :if ([:typeof $text] = "nothing") do={ :set text "" }
           [$rhTgHandleUpdate chatId=($chat->"id") fromId=($from->"id") text=$text]
         }
-        # A tapped inline-keyboard button. A read-only view (rhTgIsView) edits
-        # the existing menu card in place, so clicking through Status/
-        # Modules/Log/Help/Menu updates one message instead of spamming a new
-        # one per tap. Anything else (currently only "reboot") is a real
-        # control action - routed through the normal command handler exactly
-        # as if typed, so it still goes through the whitelist/dangerous/
-        # confirm machinery and sends its own separate message, not an edit.
+        # A tapped inline-keyboard button. "nav:<section>" is pure navigation
+        # (never runs anything), a read-only view (rhTgIsView) edits the menu
+        # card in place to show that view with its section's keyboard still
+        # attached - so clicking through Status/Modules/Log/Help/menu
+        # sections updates one message instead of spamming a new one per
+        # tap. Anything else (a real control action, e.g. reboot/sys-update/
+        # fw-upgrade/apply-updates) is routed through the normal command
+        # handler exactly as if typed, so it still goes through the
+        # whitelist/dangerous/confirm machinery and sends its own separate
+        # message, not an edit.
         :local cbq ($upd->"callback_query")
         :if ([:typeof $cbq] != "nothing") do={
           :local cbMsg ($cbq->"message")
@@ -411,10 +498,24 @@
           :local cbFrom ($cbq->"from")
           :local cbData ($cbq->"data")
           :if ([:typeof $cbData] = "nothing") do={ :set cbData "" }
-          :if ([$rhTgIsWhitelisted chatId=($cbChat->"id")] = 1 && [$rhTgIsView view=$cbData] = 1) do={
-            [$rhTgEditMessage chatId=($cbChat->"id") messageId=($cbMsg->"message_id") text=[$rhTgRenderView view=$cbData] markup=[$rhTgMenuMarkup]]
+          :local navPrefix [:pick $cbData 0 4]
+          :if ([$rhTgIsWhitelisted chatId=($cbChat->"id")] = 0) do={
+            [$rhLog module="tg-control" level="warn" text=("ignored button from non-whitelisted chat " . ($cbChat->"id"))]
           } else={
-            [$rhTgHandleUpdate chatId=($cbChat->"id") fromId=($cbFrom->"id") text=("/" . $cbData)]
+            :if ($navPrefix = "nav:") do={
+              :local section [:pick $cbData 4 [:len $cbData]]
+              :local title "🤖 <b>ROSHub control menu</b>"
+              :if ($section = "info") do={ :set title "ℹ️ <b>Info</b>" }
+              :if ($section = "tools") do={ :set title "🧰 <b>Tools</b>" }
+              :if ($section = "system") do={ :set title "⚙️ <b>System</b>" }
+              [$rhTgEditMessage chatId=($cbChat->"id") messageId=($cbMsg->"message_id") text=$title markup=[$rhTgMenuMarkup section=$section]]
+            } else={
+              :if ([$rhTgIsView view=$cbData] = 1) do={
+                [$rhTgEditMessage chatId=($cbChat->"id") messageId=($cbMsg->"message_id") text=[$rhTgRenderView view=$cbData] markup=[$rhTgMenuMarkup section=[$rhTgSectionOf name=$cbData]]]
+              } else={
+                [$rhTgHandleUpdate chatId=($cbChat->"id") fromId=($cbFrom->"id") text=("/" . $cbData)]
+              }
+            }
           }
           [$rhTgAnswerCallback id=($cbq->"id")]
         }
